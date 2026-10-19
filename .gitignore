@@ -1,0 +1,17 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Run outputs
+runs/
+
+# Python
+.venv*/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS
+.DS_Store
+*.egg-info/

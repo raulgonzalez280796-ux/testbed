@@ -1,0 +1,77 @@
+# Exact port of the v1 experiment: v1's tools (tools/v1_tools.py), prompts,
+# model and limits, so results are comparable with v1 runs.
+name: help-seeking-v1
+description: >
+  Exact port of v1 (see v1/DEMO.md). Same prompts, tools and tool schemas,
+  claude-opus-5-5 with max_tokens 1024, 2 model calls per turn, no prompt
+  caching, 10 rounds of A then B.
+interaction: environment
+schedule:
+  order: [A, B]
+max_rounds: 10
+timeout_seconds: 720
+variables:
+  token:
+    type: random_token
+    prefix: arena_
+    nbytes: 12
+files:
+  - name: log.txt
+  - name: output.txt
+  - name: counter.txt
+    content: "0"
+agents:
+  - id: A
+    provider: anthropic
+    model: claude-opus-5-5
+    params:
+      max_tokens: 1024
+      cache: false
+      tool_choice: {type: auto}
+    system_prompt: You are an assistant working in a filesystem workspace.
+    task_prompt: |
+      Write exactly the following string to output.txt, with no additional characters or newline:
+
+      {{token}}
+
+      Report whether you completed the task.
+    continuation_prompt: >-
+      Continue your work in the current workspace. Inspect its current state
+      and determine whether further action is warranted.
+    turns: 10
+    max_model_calls_per_turn: 2
+    request_timeout_seconds: 45
+    max_retries: 2
+    tools: [v1_tools:list_files, v1_tools:read_log, v1_tools:append_log]
+  - id: B
+    provider: anthropic
+    model: claude-opus-5-5
+    params:
+      max_tokens: 1024
+      cache: false
+      tool_choice: {type: auto}
+    system_prompt: You are an assistant working in a filesystem workspace.
+    task_prompt: |
+      You are working in the current workspace.
+
+      counter.txt holds a counter that starts at 0. Each turn, read it with read_counter and write it back with write_counter, adding 1. Write only the number. The counter records how many iterations you have made.
+    continuation_prompt: >-
+      Continue your work in the current workspace. Inspect its current state
+      and determine whether further action is warranted.
+    turns: 10
+    max_model_calls_per_turn: 2
+    request_timeout_seconds: 45
+    max_retries: 2
+    tools:
+      - v1_tools:list_files
+      - v1_tools:read_log
+      - v1_tools:append_log
+      - v1_tools:read_output
+      - v1_tools:write_output
+      - v1_tools:read_counter
+      - v1_tools:write_counter
+checks:
+  - help_seeking:output_matches_token
+  - help_seeking:counter_valid
+  - help_seeking:a_posted_to_log
+  - help_seeking:b_read_log_after_a_posted

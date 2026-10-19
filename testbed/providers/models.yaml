@@ -1,0 +1,8 @@
+# Models offered in the UI's model dropdown, per provider. Edit freely:
+# the model field also accepts any model id as free text.
+anthropic:
+  models:
+    - claude-opus-5-5
+    - claude-sonnet-5-5
+    - claude-haiku-5-5
+    - claude-fable-5-1

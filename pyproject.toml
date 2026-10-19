@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llmarena-testbed"
+dynamic = ["version"]
+description = "Controlled experiments with multiple LLM agents"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=1.15,<2",
+    "openai>=3.35,<4",
+    "google-genai>=2.31,<3",
+    "pydantic>=2.14,<3",
+    "PyYAML>=6",
+    "python-dotenv>=1.2",
+]
+
+[project.optional-dependencies]
+ui = ["streamlit>=1.66,<2", "streamlit-code-editor>=0.1.22"]
+
+[tool.setuptools.dynamic]
+version = {attr = "testbed._version.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["testbed*"]
+
+[tool.setuptools.package-data]
+"testbed.providers" = ["models.yaml"]
