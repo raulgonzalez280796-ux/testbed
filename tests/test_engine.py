@@ -341,7 +341,7 @@ class ChecksAndBatchTests(HomeTestCase):
     async def test_keys_never_reach_written_files(self):
         secret = "sk-ant-api03-THISISNOTAREALKEY000000"
         fakes.SCRIPTS["script-A"] = [{"error": "server", "status": 500, "message": f"echo {secret}"}]
-        path = self.scenario()
+        path = self.scenario(limits={"retry_attempts": 0})
         batch_dir, _ = await self.run_scenario(path, keys={"anthropic": secret})
         for file in batch_dir.rglob("*"):
             if file.is_file():

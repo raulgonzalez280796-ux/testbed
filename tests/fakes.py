@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import random
 
 from testbed import providers
 from testbed.providers.base import (
@@ -24,6 +25,7 @@ from testbed.providers.base import (
 
 SCRIPTS: dict[str, list] = {}
 REQUESTS: list[dict] = []
+FAILURES: dict[tuple, int] = {}  # (model, step) -> failures so far, for {"error", "times"} steps
 _ids = itertools.count(1)
 
 
@@ -35,6 +37,7 @@ class FakeAdapter(ProviderAdapter):
     sdk = "none"
     latency = 0.0
     tokens_per_call = 100
+    rate_limit_probability = 0.0  # scale tests: random 429s
 
     def build_request(self, *, model, system, messages, tools, params) -> dict:
         return {
@@ -46,14 +49,21 @@ class FakeAdapter(ProviderAdapter):
         REQUESTS.append(request)
         if self.latency:
             await asyncio.sleep(self.latency)
+        if self.rate_limit_probability and random.random() < self.rate_limit_probability:
+            raise ProviderError("rate_limit", "fake 429", status_code=429, retry_after=0.2,
+                                raw_request={"model": request["model"]}, error_type="FakeError")
         script = SCRIPTS.get(request["model"], [])
         step_index = sum(isinstance(m, AssistantReply) for m in request["messages"])
         step = script[step_index] if step_index < len(script) else "done"
         logged = {"model": request["model"], "step": step_index}
         if isinstance(step, dict) and "error" in step:
-            raise ProviderError(step["error"], step.get("message", "fake failure"),
-                                status_code=step.get("status"), raw_request=logged,
-                                error_type="FakeError")
+            key = (request["model"], step_index)
+            FAILURES[key] = FAILURES.get(key, 0) + 1
+            if "times" not in step or FAILURES[key] <= step["times"]:
+                raise ProviderError(step["error"], step.get("message", "fake failure"),
+                                    status_code=step.get("status"), retry_after=step.get("retry_after"),
+                                    raw_request=logged, error_type="FakeError")
+            step = step.get("then", "done")
         if isinstance(step, dict) and step.get("empty"):
             return ModelResponse("", [], "end_turn", False, Usage(10, 0), request["model"],
                                  None, logged, {"empty": True}, provider_blocks=[])
@@ -82,5 +92,7 @@ def install() -> None:
     providers.register("fake", FakeAdapter)
     SCRIPTS.clear()
     REQUESTS.clear()
+    FAILURES.clear()
     FakeAdapter.latency = 0.0
     FakeAdapter.tokens_per_call = 100
+    FakeAdapter.rate_limit_probability = 0.0

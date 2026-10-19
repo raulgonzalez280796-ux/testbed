@@ -88,6 +88,7 @@ class Engine:
         self.cancelled = cancelled or (lambda: False)
         self.limiter = limiter
         self.state: dict = {}
+        self.rng_jitter = random.Random()  # retry jitter only; never touches the trial's seeded rng
         self.control = TrialControl()
         self.transcript: list[SharedMessage] = []
         self.usage = Usage()
@@ -212,30 +213,53 @@ class Engine:
         request = agent.adapter.build_request(**request_args)
         loop = asyncio.get_running_loop()
         started = loop.time()
-        try:
-            if self.limiter is not None:
-                async with self.limiter.slot(spec.provider, request):
-                    response = await agent.adapter.send(request)
-            else:
-                response = await agent.adapter.send(request)
-        except ProviderError as error:
-            message = redact(error.message, self.keys)
-            self.log.emit(
-                "model_call_failed", agent_id=spec.id, round=round_number, turn=turn, call=call,
-                provider=spec.provider, duration_seconds=round(loop.time() - started, 3),
-                request=error.raw_request, error_kind=error.kind, error_type=error.error_type,
-                status_code=error.status_code, message=message,
-            )
-            raise TrialStopped("infra_error", "infra_error", {
-                "kind": error.kind, "type": error.error_type,
-                "status_code": error.status_code, "message": message,
-            }) from error
+        limits = self.scenario.limits
+        attempt = 0
+        while True:
+            try:
+                response = await self.send(spec.provider, agent.adapter, request)
+                break
+            except ProviderError as error:
+                message = redact(error.message, self.keys)
+                if error.retryable and attempt < limits.retry_attempts:
+                    attempt += 1
+                    delay = error.retry_after or min(
+                        limits.retry_max_delay_seconds, 2 ** attempt + self.rng_jitter.random())
+                    if self.limiter is not None and error.kind == "rate_limit":
+                        await self.limiter.rate_limited(spec.provider, error.retry_after)
+                    self.log.emit(
+                        "rate_limited" if error.kind == "rate_limit" else "call_retry",
+                        agent_id=spec.id, round=round_number, turn=turn, call=call,
+                        provider=spec.provider, attempt=attempt, delay_seconds=round(delay, 2),
+                        error_kind=error.kind, status_code=error.status_code, message=message,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                self.log.emit(
+                    "model_call_failed", agent_id=spec.id, round=round_number, turn=turn, call=call,
+                    provider=spec.provider, duration_seconds=round(loop.time() - started, 3),
+                    attempts=attempt + 1, request=error.raw_request, error_kind=error.kind,
+                    error_type=error.error_type, status_code=error.status_code, message=message,
+                )
+                raise TrialStopped("infra_error", "infra_error", {
+                    "kind": error.kind, "type": error.error_type,
+                    "status_code": error.status_code, "message": message,
+                }) from error
         self.log.emit(
             "model_call", agent_id=spec.id, round=round_number, turn=turn, call=call,
             provider=spec.provider, duration_seconds=round(loop.time() - started, 3),
             request_id=response.request_id, model=response.model,
+            attempts=attempt + 1,
             request=response.raw_request, response=response.raw_response,
         )
+        return response
+
+    async def send(self, provider: str, adapter: ProviderAdapter, request: dict) -> ModelResponse:
+        if self.limiter is None:
+            return await adapter.send(request)
+        async with self.limiter.slot(provider, request):
+            response = await adapter.send(request)
+        await self.limiter.success(provider)
         return response
 
     async def run_tools(self, agent: AgentRuntime, response: ModelResponse, round_number: int, turn: int) -> list[ToolResult]:

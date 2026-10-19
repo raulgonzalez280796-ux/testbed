@@ -89,6 +89,9 @@ class LimitsSpec(Spec):
     max_tool_input_bytes: int = Field(16_000, ge=1)
     max_file_bytes: int = Field(64_000, ge=1)
     tool_timeout_seconds: float = Field(30.0, gt=0)
+    # Engine-level retries for rate limits, server and connection errors (after the SDK's own).
+    retry_attempts: int = Field(6, ge=0, le=20)
+    retry_max_delay_seconds: float = Field(60.0, gt=0)
 
 
 class Scenario(Spec):

@@ -17,6 +17,8 @@ from .base import ProviderAdapter, ProviderInfo
 
 PROVIDERS: dict[str, str] = {
     "anthropic": "testbed.providers.anthropic:AnthropicAdapter",
+    "openai": "testbed.providers.openai:OpenAIAdapter",
+    "gemini": "testbed.providers.gemini:GeminiAdapter",
 }
 
 # Registered at runtime only (tests); never listed in the UI.

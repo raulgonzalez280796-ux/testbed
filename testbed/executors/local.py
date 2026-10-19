@@ -13,6 +13,8 @@ from pathlib import Path
 from ..batch import Summary, load_batch
 from ..budget import BatchBudget
 from ..keys import load_keys, missing_keys
+from ..settings import load_settings
+from .ratelimit import RateLimiter
 from ..trial import BatchContext, is_complete, now, run_trial
 
 BREAKER_THRESHOLD = 5  # consecutive trials failing with the same infrastructure error
@@ -61,6 +63,8 @@ async def run_batch_dir(
     if missing:
         raise MissingKeys(missing)
     parallel = max(1, parallel or spec["parallel"])
+    if limiter is None:
+        limiter = RateLimiter(load_settings(home))
     summary = Summary(batch_dir, spec, scenario)
     summary.status, summary.started_at = "running", now()
     cancel_file = batch_dir / "cancel"
@@ -97,6 +101,7 @@ async def run_batch_dir(
             await dirty.wait()
             dirty.clear()
             summary.running_peak = max(summary.running_peak, len(running))
+            summary.rate_limits = limiter.snapshot()
             summary.save()
             await asyncio.sleep(0.5)
 
@@ -152,7 +157,7 @@ async def run_batch_dir(
             f"Token cap reached ({budget.used:,} tokens used)" if stop["reason"] == "budget_stopped" else None
         )
         summary.finished_at = now()
-        summary.running_peak = max(summary.running_peak, 0)
+        summary.rate_limits = limiter.snapshot()
         for index in summary.rows:
             if summary.rows[index]["status"] in ("running", "queued", "incomplete"):
                 summary.refresh(index)
@@ -161,5 +166,6 @@ async def run_batch_dir(
         "batch_dir": str(batch_dir), "status": summary.status, "message": summary.message,
         "counts": summary.counts(), "tokens_total": budget.used,
         "seconds": round(time.monotonic() - started, 1),
+        "running_peak": summary.running_peak, "rate_limits": summary.rate_limits,
     }
     return summary_data

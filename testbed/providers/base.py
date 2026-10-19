@@ -136,6 +136,7 @@ class ProviderAdapter(ABC):
     name: ClassVar[str]
     label: ClassVar[str]
     env_key: ClassVar[str]
+    env_aliases: ClassVar[tuple[str, ...]] = ()  # also accepted, e.g. GOOGLE_API_KEY
     key_url: ClassVar[str]
     sdk: ClassVar[str]  # package name, recorded in manifests
 

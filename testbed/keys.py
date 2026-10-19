@@ -31,10 +31,12 @@ def load_keys(home: Path) -> dict[str, str]:
     file_values = dotenv_values(env_file(home)) if env_file(home).exists() else {}
     keys = {}
     for name in providers.provider_names():
-        variable = providers.env_key(name)
-        value = os.environ.get(variable) or file_values.get(variable) or ""
-        if value.strip():
-            keys[name] = value.strip()
+        cls = providers.adapter_class(name)
+        for variable in (cls.env_key, *cls.env_aliases):
+            value = (os.environ.get(variable) or file_values.get(variable) or "").strip()
+            if value:
+                keys[name] = value
+                break
     return keys
 
 

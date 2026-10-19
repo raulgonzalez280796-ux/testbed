@@ -36,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--parallel", type=int, default=1, help="N: trials at once")
     run.add_argument("--seed", type=int)
     run.add_argument("--label", default="")
+    run.add_argument("--yes", action="store_true",
+                     help="skip the confirmation for batches above 20 trials")
     for name in ("resume", "cancel", "status", "recheck"):
         sub = commands.add_parser(name)
         sub.add_argument("batch_dir")
@@ -54,16 +56,34 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def cmd_run(args, home: Path) -> int:
+    from .api import arun_pilot, resolve_scenario
     from .batch import create_batch
-    from .executors.local import MissingKeys, run_batch_dir
+    from .executors.local import MissingKeys
+    from .pilot import describe, plan_for_path
 
-    scenario_path = Path(args.scenario)
-    if not scenario_path.is_absolute() and not scenario_path.exists():
-        scenario_path = home / scenario_path
+    scenario_path = resolve_scenario(home, args.scenario)
     try:
+        plan = plan_for_path(home, scenario_path, args.trials)
+        if plan["needs_confirmation"] and not args.yes:
+            if plan["needs_pilot"]:
+                print("No earlier trials of this scenario: running a 3-trial pilot to project tokens.")
+                try:
+                    asyncio.run(arun_pilot(scenario_path, home=home))
+                except MissingKeys as error:
+                    print(f"{error}. Add them in the UI's Settings page or in {home / '.env'}.",
+                          file=sys.stderr)
+                    return 2
+                plan = plan_for_path(home, scenario_path, args.trials)
+            print(describe(plan))
+            if not sys.stdin.isatty():
+                print("Re-run with --yes to start the batch.", file=sys.stderr)
+                return 2
+            if input("Start the batch? [y/N] ").strip().lower() not in ("y", "yes"):
+                print("Not started.")
+                return 1
         batch_dir = create_batch(
             home, scenario_path, trials=args.trials, parallel=args.parallel,
-            seed=args.seed, label=args.label,
+            seed=args.seed, label=args.label, projection=plan["projection"],
         )
     except Exception as error:
         print(f"Cannot start: {error}", file=sys.stderr)
@@ -170,7 +190,7 @@ def cmd_keys(args, home: Path) -> int:
     for name in providers.provider_names():
         info = providers.provider_info(name)
         state = f"set ({masked(keys[name])}, from {key_source(home, name)})" if name in keys else "not set"
-        print(f"{info.label:<10} {info.env_key:<20} {state}")
+        print(f"{info.label:<14} {info.env_key:<20} {state}")
     return 0
 
 

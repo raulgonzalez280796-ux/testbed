@@ -39,7 +39,7 @@ def validate_code(home: Path, scenario: Scenario) -> None:
 
 def create_batch(
     home: Path, scenario_path: Path, *, trials: int, parallel: int,
-    seed: int | None = None, label: str = "",
+    seed: int | None = None, label: str = "", projection: dict | None = None,
 ) -> Path:
     if trials < 1 or parallel < 1:
         raise ValueError("trials and parallel must be at least 1")
@@ -61,6 +61,7 @@ def create_batch(
         "trials": trials, "parallel": min(parallel, trials),
         "seed": seed if seed is not None else secrets.randbits(63),
         "created_at": now(), "testbed_version": __version__,
+        "projection": projection,
     })
     return batch_dir
 
@@ -105,8 +106,9 @@ class Summary:
         self.started_at: str | None = None
         self.finished_at: str | None = None
         self.message: str | None = None
-        self.projection: dict | None = None
+        self.projection: dict | None = spec.get("projection")
         self.running_peak = 0
+        self.rate_limits: dict = {}
 
     def set(self, index: int, **fields) -> None:
         self.rows[index].update(fields)
@@ -131,6 +133,7 @@ class Summary:
             "counts": self.counts(), "tokens_total": tokens,
             "budget": self.scenario.budget.model_dump(),
             "projection": self.projection, "running_peak": self.running_peak,
+            "rate_limits": self.rate_limits,
             "trials": rows,
         })
         columns = ["trial", "status", "stop_reason", "duration_seconds", "tokens", "error", "dir"]

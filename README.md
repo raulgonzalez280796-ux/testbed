@@ -12,7 +12,7 @@ Then you run it once, or M times with N trials at a time. Every trial leaves a c
 - `result.json`: status, token use and your checks;
 - the final files.
 
-Status: **stage 1, milestone 1**. The engine, CLI and Python API work with Anthropic. OpenAI and Gemini adapters and the UI come next.
+Status: **stage 1, milestone 2**. The engine, CLI and Python API work with Anthropic, OpenAI and Gemini. The UI comes next.
 
 ## Install
 
@@ -33,6 +33,8 @@ Add a key only for the providers you use; one is enough. Keys are read from envi
 | Provider | Variable | Where to create a key |
 |---|---|---|
 | Anthropic | `ANTHROPIC_API_KEY` | https://platform.claude.com/settings/keys |
+| OpenAI | `OPENAI_API_KEY` | https://platform.openai.com/api-keys |
+| Google Gemini | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | https://aistudio.google.com/apikey |
 
 Use a separate key with a spending limit for experiments.
 
@@ -60,6 +62,12 @@ Run 30 trials, 10 at a time:
 .venv/bin/python -m testbed run scenarios/help_seeking.yaml --trials 30 --parallel 10
 ```
 
+**Batches above 20 trials ask for confirmation first.** The testbed projects their token use from at least 3 earlier completed trials of the same scenario. If there aren't 3, it runs a 3-trial pilot first. It then prints the projection (median and p90) and asks before starting; add `--yes` to skip the question.
+
+The scenario's `budget` sets token caps:
+- `max_total_tokens` stops launching new trials once the batch reaches the cap, and stops trials still running at cap + 10%.
+- `max_trial_tokens` ends a single trial.
+
 Other commands:
 
 | Command | What it does |
@@ -73,14 +81,35 @@ Other commands:
 From Python or a notebook:
 
 ```python
-from testbed import run_batch
-summary = run_batch("scenarios/help_seeking.yaml", trials=30, parallel=10)
+from testbed import run_batch, ConfirmationRequired
+
+try:
+    summary = run_batch("scenarios/help_seeking.yaml", trials=100, parallel=20)
+except ConfirmationRequired as needed:
+    print(needed)  # the projection; run again with yes=True to start
 ```
+
+## Rate limits and parallel trials
+
+Trials spend most of their time waiting for the API, so one process runs many at once. In a test with a fake provider, 1000 trials ran in parallel in under 100 MB of memory. In practice the limit is your provider account's rate limits, not your computer.
+
+Set your account's limits in `settings.yaml` in the project folder (each provider's console shows them). Limits apply to the whole account, so more machines do not raise them.
+
+```yaml
+rate_limits:
+  anthropic:
+    requests_per_minute: 4000
+    input_tokens_per_minute: 2000000
+    max_concurrent: 200   # requests in flight at once (default 100)
+```
+
+When a provider answers 429 (rate limited), the call waits as long as the provider asks (`retry-after`) and is retried; each wait is logged as a `rate_limited` event. The testbed also lowers how many requests it keeps in flight, then raises it again slowly. A trial fails as `infra_error` only after the retries run out (`limits.retry_attempts` in the scenario, default 6). After 5 trials in a row fail with the same error, such as a bad key, the batch stops. `summary.json` shows how many requests were in flight at most and how often the provider rate-limited.
 
 ## Project folder
 
 | Folder | Contents |
 |---|---|
+| `settings.yaml` | Rate limits per provider (optional) |
 | `scenarios/*.yaml` | Scenarios. `help_seeking.yaml` uses only built-in tools; `help_seeking_v1.yaml` is an exact port of the v1 experiment. |
 | `tools/*.py` | Your tools. Scenarios refer to them as `file:function`, e.g. `v1_tools:read_log`. |
 | `checks/*.py` | Your checks, also as `file:function`. |

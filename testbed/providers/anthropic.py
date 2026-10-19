@@ -8,6 +8,7 @@ from .base import (
     AssistantReply, Message, ModelResponse, ProviderAdapter, ProviderError,
     ToolCall, ToolResults, ToolSpec, Usage, UserInput, jsonable, split_params,
 )
+from .errors import classify_stainless
 
 DEFAULT_MAX_TOKENS = 16_000
 
@@ -125,32 +126,4 @@ def parse_response(request: dict, response) -> ModelResponse:
 
 
 def classify(error: anthropic.APIError, request: dict) -> ProviderError:
-    status = getattr(error, "status_code", None)
-    if isinstance(error, anthropic.RateLimitError):
-        kind = "rate_limit"
-    elif isinstance(error, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
-        kind = "auth"
-    elif isinstance(error, anthropic.NotFoundError):
-        kind = "not_found"
-    elif isinstance(error, anthropic.APITimeoutError):
-        kind = "timeout"
-    elif isinstance(error, anthropic.APIConnectionError):
-        kind = "connection"
-    elif isinstance(error, anthropic.APIStatusError) and status and status >= 500:
-        kind = "server"
-    elif isinstance(error, anthropic.APIStatusError) and status and status < 500:
-        kind = "bad_request"
-    else:
-        kind = "other"
-    retry_after = None
-    response = getattr(error, "response", None)
-    if response is not None:
-        try:
-            retry_after = float(response.headers.get("retry-after"))
-        except (TypeError, ValueError):
-            retry_after = None
-    return ProviderError(
-        kind, str(getattr(error, "message", error)), status_code=status,
-        retry_after=retry_after, raw_request=jsonable(request) if request else None,
-        error_type=type(error).__name__,
-    )
+    return classify_stainless(error, anthropic, request)
