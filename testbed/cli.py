@@ -8,6 +8,8 @@
   validate SCENARIO                                     check the file and its tools/checks
   preview SCENARIO                                      what each agent will receive
   keys                                                  which provider keys are set
+  init [FOLDER]                                         create a project folder with examples
+  ui [--port P]                                         open the web UI (on this computer only)
 
 The project folder (scenarios/, tools/, checks/, runs/, .env) is --home,
 else $TESTBED_HOME, else the current folder.
@@ -45,6 +47,11 @@ def main(argv: list[str] | None = None) -> int:
         sub = commands.add_parser(name)
         sub.add_argument("scenario")
     commands.add_parser("keys")
+    init = commands.add_parser("init", help="create a project folder with the example templates")
+    init.add_argument("folder", nargs="?", default=".")
+    ui = commands.add_parser("ui", help="open the web UI")
+    ui.add_argument("--port", type=int, default=8501)
+    ui.add_argument("--no-browser", action="store_true")
     args = parser.parse_args(argv)
     home = resolve_home(args.home)
 
@@ -194,7 +201,41 @@ def cmd_keys(args, home: Path) -> int:
     return 0
 
 
+def cmd_init(args, home: Path) -> int:
+    from .project import init_project
+
+    folder = Path(args.folder).resolve()
+    created = init_project(folder)
+    print(f"Project folder: {folder}")
+    for name in created:
+        print(f"  added {name}")
+    print("Next: add an API key (python -m testbed ui, Settings), or copy .env.example to .env.")
+    return 0
+
+
+def cmd_ui(args, home: Path) -> int:
+    import os
+    import subprocess
+
+    from .project import ensure_project
+
+    ensure_project(home)
+    app = Path(__file__).with_name("ui") / "app.py"
+    env = {**os.environ, "TESTBED_HOME": str(home)}
+    command = [
+        sys.executable, "-m", "streamlit", "run", str(app),
+        "--server.address", "127.0.0.1",  # this computer only: the UI has no login
+        "--server.port", str(args.port),
+        "--browser.gatherUsageStats", "false",
+        "--client.toolbarMode", "minimal",
+        "--server.headless", "true" if args.no_browser else "false",
+    ]
+    print(f"Testbed UI for {home} at http://localhost:{args.port}")
+    return subprocess.call(command, env=env)
+
+
 COMMANDS = {
     "run": cmd_run, "resume": cmd_resume, "cancel": cmd_cancel, "status": cmd_status,
     "recheck": cmd_recheck, "validate": cmd_validate, "preview": cmd_preview, "keys": cmd_keys,
+    "init": cmd_init, "ui": cmd_ui,
 }

@@ -94,7 +94,7 @@ class AnthropicAdapterTests(unittest.TestCase):
         self.assertTrue(parsed.truncated)
 
     def test_v1_tools_send_v1_schemas(self):
-        tools = resolve_agent_tools(["v1_tools:list_files", "v1_tools:append_log"], REPO / "tools", "A")
+        tools = resolve_agent_tools(["v1_tools:list_files", "v1_tools:append_log"], REPO / "testbed" / "templates" / "tools", "A")
         self.assertEqual(tools["list_files"].parameters, {"properties": {}, "required": [], "type": "object"})
         self.assertEqual(tools["append_log"].parameters, {
             "properties": {"text": {"description": "text", "title": "Text", "type": "string"}},

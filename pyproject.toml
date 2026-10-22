@@ -26,4 +26,5 @@ version = {attr = "testbed._version.__version__"}
 include = ["testbed*"]
 
 [tool.setuptools.package-data]
+"testbed" = ["templates/*/*.yaml", "templates/*/*.py", "ui/*.py", "ui/pages/*.py", "ui/components/*.py"]
 "testbed.providers" = ["models.yaml"]

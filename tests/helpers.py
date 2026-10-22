@@ -11,6 +11,7 @@ from testbed.logger import read_events
 from . import fakes
 
 REPO = Path(__file__).resolve().parents[1]
+TEMPLATES = REPO / "testbed" / "templates"
 
 
 def agent(agent_id, model=None, **fields):
@@ -32,9 +33,9 @@ class HomeTestCase(unittest.IsolatedAsyncioTestCase):
         self.home = Path(self.tmp.name)
         for kind in ("scenarios", "tools", "checks"):
             (self.home / kind).mkdir()
-        for path in (REPO / "tools").glob("*.py"):
+        for path in (TEMPLATES / "tools").glob("*.py"):
             shutil.copy(path, self.home / "tools")
-        for path in (REPO / "checks").glob("*.py"):
+        for path in (TEMPLATES / "checks").glob("*.py"):
             shutil.copy(path, self.home / "checks")
 
     def tearDown(self):

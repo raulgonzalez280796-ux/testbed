@@ -56,6 +56,10 @@ class ScenarioValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "no turn-1 input"):
             Scenario.model_validate(self.base(agents=[agent("A", task_prompt="")]))
 
+    def test_conversation_mode_may_start_from_messages(self):
+        Scenario.model_validate(self.base(
+            interaction="conversation", agents=[agent("A"), agent("B", task_prompt="", continuation_prompt="")]))
+
     def test_shared_task_counts_as_turn_one_input(self):
         Scenario.model_validate(self.base(shared_task="Shared.", agents=[agent("A", task_prompt="")]))
 

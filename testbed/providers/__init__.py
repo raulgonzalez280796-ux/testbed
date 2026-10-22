@@ -52,17 +52,17 @@ def is_known(name: str) -> bool:
 
 
 @lru_cache(maxsize=1)
-def _model_lists() -> dict[str, list[str]]:
+def _model_lists() -> dict[str, dict]:
     path = Path(__file__).with_name("models.yaml")
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return {name: list(entry.get("models", [])) for name, entry in data.items()}
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
 def provider_info(name: str) -> ProviderInfo:
     cls = adapter_class(name)
     return ProviderInfo(
         name=cls.name, label=cls.label, env_key=cls.env_key, key_url=cls.key_url,
-        sdk=cls.sdk, models=_model_lists().get(name, []),
+        sdk=cls.sdk, models=list(_model_lists().get(name, {}).get("models", [])),
+        default_model=_model_lists().get(name, {}).get("default"),
     )
 
 

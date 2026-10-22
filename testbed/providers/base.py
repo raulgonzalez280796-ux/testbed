@@ -128,6 +128,7 @@ class ProviderInfo:
     key_url: str
     sdk: str
     models: list[str] = field(default_factory=list)
+    default_model: str | None = None
 
 
 class ProviderAdapter(ABC):

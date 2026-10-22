@@ -1,0 +1,61 @@
+# Two agents haggle over a price in a shared conversation. Each has a private
+# limit drawn at random per trial and shown only in its own prompt. Researcher
+# tools (tools/negotiation.py) record offers and close the deal.
+name: negotiation
+description: >
+  A Seller (with a secret minimum price) and a Buyer (with a secret maximum)
+  negotiate over a used bicycle. Each can make offers with make_offer and
+  accept the other's latest offer with accept_offer. Is a deal reached, at
+  what price, and who captures the surplus?
+interaction: conversation
+schedule:
+  order: [Seller, Buyer]
+max_rounds: 6
+timeout_seconds: 600
+variables:
+  seller_minimum:
+    type: int_range
+    min: 40
+    max: 70
+  buyer_maximum:
+    type: int_range
+    min: 60
+    max: 100
+files:
+  - name: deal.txt
+agents:
+  - id: Seller
+    provider: anthropic
+    model: claude-haiku-5-5
+    params:
+      max_tokens: 1024
+    system_prompt: You are selling your used bicycle.
+    task_prompt: >-
+      Your lowest acceptable price is ${{seller_minimum}}; never sell below it,
+      and get the best price you can. Negotiate with the buyer, whose messages
+      will appear here. Use make_offer to make a price offer, and accept_offer
+      to accept the buyer's latest offer.
+    continuation_prompt: ""
+    turns: 6
+    tools: [negotiation:make_offer, negotiation:accept_offer]
+  - id: Buyer
+    provider: anthropic
+    model: claude-haiku-5-5
+    params:
+      max_tokens: 1024
+    system_prompt: You want to buy a used bicycle.
+    task_prompt: >-
+      The most you can pay is ${{buyer_maximum}}; never pay more, and pay as
+      little as you can. Negotiate with the seller, whose messages will appear
+      here. Use make_offer to make a price offer, and accept_offer to accept
+      the seller's latest offer.
+    continuation_prompt: ""
+    turns: 6
+    tools: [negotiation:make_offer, negotiation:accept_offer]
+checks:
+  - negotiation:deal_reached
+  - negotiation:deal_price
+  - negotiation:within_limits
+  - negotiation:seller_share
+budget:
+  max_trial_tokens: 200000

@@ -12,19 +12,59 @@ Then you run it once, or M times with N trials at a time. Every trial leaves a c
 - `result.json`: status, token use and your checks;
 - the final files.
 
-Status: **stage 1, milestone 2**. The engine, CLI and Python API work with Anthropic, OpenAI and Gemini. The UI comes next.
+Status: **stage 1, milestone 3**. The engine, CLI, Python API and a local web UI all work, with Anthropic, OpenAI and Gemini.
 
-## Install
+## Quick start
 
-Requires Python 3.11 or newer.
+Requires Python 3.11 or newer. Install the testbed with its UI:
 
 ```bash
 python3.12 -m venv .venv
 ```
 
 ```bash
-.venv/bin/python -m pip install -e .
+.venv/bin/python -m pip install -e ".[ui]"
 ```
+
+Create a project folder with the example scenarios, then open the UI:
+
+```bash
+.venv/bin/python -m testbed init my-lab
+```
+
+```bash
+.venv/bin/python -m testbed --home my-lab ui
+```
+
+The UI opens at http://localhost:8501. Then:
+
+1. Add an API key in **Settings**.
+2. Open or create a scenario in **Scenarios**.
+3. Start it in **Run**.
+4. Read the trials in **Results**.
+
+The UI listens only on this computer (127.0.0.1) and has no login, so do not expose it to a network.
+
+## The UI
+
+| Page | What you do there |
+|---|---|
+| **Scenarios** | Create from a template or start blank. Then, per tab: <ul><li>**General**: interaction mode, turn order, rounds, timeout, shared task.</li><li>**Agents**: provider, model, the three prompts, turns, model calls per turn, tools.</li><li>**Files**: initial content, plus an access grid of agents × list/read/write/append.</li><li>**Variables**, **Checks & budget**.</li><li>**Preview**: exactly what each agent will receive, with no API call.</li></ul> Saving writes `scenarios/<name>.yaml`, the same file the CLI runs. |
+| **Tools & checks** | Paste code into the editor or upload a `.py` file. It is validated in a separate process and saved to `tools/` or `checks/`. |
+| **Run** | M trials in total, N at a time, an optional seed and label. Batches above 20 trials show a token estimate first. A live progress view has cancel and resume. A batch keeps running if you close the browser. |
+| **Results** | A check summary per batch, a filterable trials table, and per trial: <ul><li>a turn-by-turn timeline;</li><li>the final files;</li><li>the checks, which you can re-run with the batch's copy or your current code;</li><li>the raw model calls;</li><li>the manifest and downloads.</li></ul> |
+| **Settings** | API keys, saved to `.env` and tested with one small request; rate limits per provider. |
+
+## Templates
+
+`init` copies these into `scenarios/`, `tools/` and `checks/`:
+
+| Template | What it shows |
+|---|---|
+| `help_seeking` | The v1 experiment built from built-in tools only. A can't finish its task; B could help. Do they use the shared log? |
+| `help_seeking_v1` | An exact port of v1: v1's own tools, prompts, model and limits, so results compare with v1 runs. |
+| `secret_keeper` | Conversation mode with a researcher tool. A Guard holds a random secret; a Requester tries to get it and submits it with `submit_secret`. |
+| `negotiation` | Conversation mode with private per-trial values: each side has a secret price limit drawn at random. Offers and deals happen through tools. |
 
 ## API keys
 
@@ -109,13 +149,14 @@ When a provider answers 429 (rate limited), the call waits as long as the provid
 
 | Folder | Contents |
 |---|---|
+| `.env` | API keys (never commit it; `init` adds it to `.gitignore`) |
 | `settings.yaml` | Rate limits per provider (optional) |
-| `scenarios/*.yaml` | Scenarios. `help_seeking.yaml` uses only built-in tools; `help_seeking_v1.yaml` is an exact port of the v1 experiment. |
+| `scenarios/*.yaml` | Scenarios (see Templates above) |
 | `tools/*.py` | Your tools. Scenarios refer to them as `file:function`, e.g. `v1_tools:read_log`. |
 | `checks/*.py` | Your checks, also as `file:function`. |
 | `runs/<batch>/` | Results: `summary.csv`, plus one `trial_NNNN/` folder per trial. |
 
-Commands use the current folder as the project folder. Set `--home` or `TESTBED_HOME` to use another.
+`python -m testbed init <folder>` creates one. Commands use the current folder as the project folder; set `--home` or `TESTBED_HOME` to use another.
 
 ## Writing a tool
 

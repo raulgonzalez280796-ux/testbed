@@ -15,3 +15,8 @@ __pycache__/
 # OS
 .DS_Store
 *.egg-info/
+
+# Local tool settings
+.claude/
+build/
+dist/

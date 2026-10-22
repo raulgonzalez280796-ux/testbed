@@ -131,6 +131,9 @@ class Scenario(Spec):
                 raise ValueError(f"schedule.order names unknown agents: {sorted(unknown)}")
             if len(set(self.schedule.order)) != len(self.schedule.order):
                 raise ValueError("schedule.order lists an agent twice")
+            missing = [agent_id for agent_id in ids if agent_id not in self.schedule.order]
+            if missing:
+                raise ValueError(f"schedule.order leaves out {missing}; they would never take a turn")
         names = [spec.name for spec in self.files]
         if len(set(names)) != len(names):
             raise ValueError(f"file names must be unique: {names}")
@@ -145,7 +148,10 @@ class Scenario(Spec):
         for agent in self.agents:
             if len(set(agent.tools)) != len(agent.tools):
                 raise ValueError(f"agent {agent.id}: a tool is listed twice")
-            if not (self.shared_task.strip() or agent.task_prompt.strip()):
+            if self.interaction == "environment" and not (
+                self.shared_task.strip() or agent.task_prompt.strip()
+            ):
+                # In conversation mode the first input may be the other agents' messages.
                 raise ValueError(
                     f"agent {agent.id} has no turn-1 input: set shared_task or its task_prompt"
                 )
