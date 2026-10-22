@@ -2,6 +2,32 @@
 
 Every batch is one self-contained folder under `runs/` in your project. It holds a frozen copy of the scenario and of your tool and check code, so a batch can be read, re-checked or resumed later, even after you change the scenario. The UI's Results page reads these files; you can also open them directly, or load them into pandas.
 
+## Reading one trial: the trial script
+
+Every trial has its own page in the UI, with its own link: **Open ↗** in the Results trials table, or a running trial's button on the Run page. Each opens in a new browser tab, so several trials can be open side by side. **← / →** move to the previous or next trial.
+
+The **Script** tab is the trial, step by step, in the order it happened. Each step shows the time since the trial started, the agent, and what is new at that step:
+
+| Step | What you see |
+|---|---|
+| **received** | The input of the turn: the task on turn 1, the continuation prompt later. In conversation mode, the other agents' messages are shown apart from the instruction. On an agent's first turn you also see its system prompt and the tools it can use. |
+| **wrote** | The reply, exactly as the model wrote it, with its call number, tokens, duration and stop reason |
+| **called tool(…)** | The tool's arguments, then its result or error, the file and action, and how long it took |
+| notes and problems | Notes from tools, retries and waits after a 429, empty replies, failed model calls |
+| **ended its turn** | Why the turn ended: no tool call, the call limit, or the agent finished |
+
+- **Filters and search:**
+  - filter by agent, kind of step, tool and round;
+  - **Search** keeps only the steps that contain a text, for example a token.
+  - **Raw events** shows the logged events under each step: for a reply, the exact request sent to the provider and its raw response.
+- **While a trial runs:**
+  - the script refreshes every 2 seconds, and new steps appear at the bottom. **Follow the newest steps** (on by default) keeps them in view in a scrolling box;
+  - a line at the top says what is happening, for example "Running +00:42 · round 3 · B is waiting for the model (8 s)".
+- **Downloads:**
+  - **Script .md** and **Script .html** hold the whole trial, whatever the filters. The HTML opens in any browser.
+  - The same from the command line: `python -m testbed script runs/<batch>/trial_0001 --format html --out trial.html`.
+- **Other tabs:** the final files, the checks, the raw log (every model call and every event) and the manifest.
+
 ```
 runs/<batch_id>/
   batch.json            settings of the batch
@@ -122,7 +148,7 @@ Most events also carry `agent_id`, `round` and `turn`; model and tool events add
 |---|---|---|
 | `run_started` | `agents`, `seed` | Start of the trial |
 | `round_started` | `round`, `order` | Each round, with the turn order used |
-| `turn_started` | `prompt` | Start of a turn: the exact input sent to the agent |
+| `turn_started` | `prompt`, `instruction`, and in conversation mode `messages` | Start of a turn. `prompt` is the exact input sent to the agent. It is made of the other agents' `messages` (each `{sender, round, text}`, conversation mode only) followed by the `instruction` (the task or continuation prompt). Trials run before this version have `prompt` only. |
 | `turn_skipped` | `reason` | Conversation mode, when an agent has no input this turn |
 | `model_call` | `provider`, `duration_seconds`, `attempts`, `request_id`, `model`, `request`, `response` | After each successful model call: **the request exactly as passed to the SDK, and the raw response** |
 | `agent_reply` | `call`, `text`, `tool_calls` (`id`, `name`, `arguments`), `stop_reason`, `truncated`, `usage` | The parsed reply of each model call |

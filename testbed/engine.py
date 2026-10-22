@@ -116,9 +116,11 @@ class Engine:
 
     # -- one turn ---------------------------------------------------------------
 
-    def turn_input(self, agent: AgentRuntime, turn: int) -> str:
+    def turn_input(self, agent: AgentRuntime, turn: int) -> tuple[str, str, list[SharedMessage]]:
+        """(the input text, its instruction part, the other agents' messages delivered in it)."""
         prompt = agent.turn_one if turn == 1 else agent.continuation
         parts = []
+        new: list[SharedMessage] = []
         if self.scenario.interaction == "conversation":
             new = [m for m in self.transcript[agent.cursor:] if m.sender != agent.spec.id]
             agent.cursor = len(self.transcript)
@@ -128,19 +130,23 @@ class Engine:
                     for m in new
                 ))
         parts.append(prompt)
-        return "\n\n".join(part for part in parts if part.strip())
+        return "\n\n".join(part for part in parts if part.strip()), prompt, new
 
     async def run_turn(self, agent: AgentRuntime, round_number: int) -> None:
         agent.turns_taken += 1
         turn = agent.turns_taken
         agent_id = agent.spec.id
-        text = self.turn_input(agent, turn)
+        text, instruction, delivered = self.turn_input(agent, turn)
         if not text.strip():
             # Only possible in conversation mode with no new messages and no continuation prompt.
             self.log.emit("turn_skipped", agent_id=agent_id, round=round_number, turn=turn,
                           reason="no input")
             return
-        self.log.emit("turn_started", agent_id=agent_id, round=round_number, turn=turn, prompt=text)
+        extra = {"messages": [{"sender": m.sender, "round": m.round, "text": m.text} for m in delivered]} \
+            if self.scenario.interaction == "conversation" else {}
+        # prompt is the exact input; instruction and messages are its parts, for the trial script.
+        self.log.emit("turn_started", agent_id=agent_id, round=round_number, turn=turn, prompt=text,
+                      instruction=instruction, **extra)
         agent.history.append(UserInput(text))
         texts: list[str] = []
         stop_reason = None

@@ -21,7 +21,9 @@ from testbed.keys import load_keys, missing_keys
 from testbed.pilot import PILOT_TRIALS, describe, plan_batch
 from testbed.project import scenario_files
 from testbed.scenario import load_scenario
-from testbed.ui.components.common import flash, home, compact, read_json, show_flash, status_text, tokens
+from testbed.ui.components.common import (
+    compact, flash, home, read_json, show_flash, status_text, tokens, trial_url,
+)
 
 FINAL = {"completed", "timeout", "infra_error", "budget_stopped", "cancelled", "not_run"}
 
@@ -153,6 +155,15 @@ def progress(batch_dir: Path) -> None:
                             f"{summary.get('running_peak', 0)}.")
         if summary.get("message"):
             st.warning(summary["message"])
+        running = [row["trial"] for row in summary.get("trials", []) if row.get("status") == "running"]
+        if running and alive:
+            st.caption("Running now. Open a trial to watch its script live, in a new tab:")
+            with st.container(horizontal=True):
+                for number in running[:12]:
+                    st.link_button(f"Trial {number}", trial_url(batch_dir.name, number),
+                                   icon=":material/open_in_new:")
+            if len(running) > 12:
+                st.caption(f"…and {len(running) - 12} more; Results lists them all.")
         if status == "running" and not alive:
             st.warning("The runner process is not running (it may have been stopped). Resume to finish.")
         buttons = st.columns(3)

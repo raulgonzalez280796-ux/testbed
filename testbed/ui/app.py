@@ -13,7 +13,7 @@ from testbed import __version__
 from testbed.project import ensure_project
 from testbed.ui.components.code_box import code_editor
 from testbed.ui.components.common import home
-from testbed.ui.views import checks_page, results, run, scenarios, settings, tools_page
+from testbed.ui.views import checks_page, results, run, scenarios, settings, tools_page, trial_page
 
 st.set_page_config(page_title="llmArena testbed", page_icon=":material/hub:", layout="wide")
 
@@ -28,6 +28,9 @@ PAGES = {
     "run": st.Page(run.render, title="Run", icon=":material/play_arrow:", url_path="run"),
     "results": st.Page(results.render, title="Results", icon=":material/table_view:", url_path="results"),
     "settings": st.Page(settings.render, title="Settings", icon=":material/key:", url_path="settings"),
+    # One trial's script; opened from Results and Run as trial?batch=...&trial=N, so not in the menu.
+    "trial": st.Page(trial_page.render, title="Trial", icon=":material/subject:", url_path="trial",
+                     visibility="hidden"),
 }
 st.session_state["pages"] = PAGES
 

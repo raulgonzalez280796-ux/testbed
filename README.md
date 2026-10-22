@@ -61,7 +61,8 @@ The UI listens only on this computer (127.0.0.1) and has no login, so do not exp
 | **Tools** | Every tool in the project (one Python file each), with your note, what the model is told, the file it works on and which scenarios use it. Add a tool from a starter, pasted code or a `.py` file. Edit, check (Python and tool rules), duplicate or delete it. |
 | **Checks** | Paste code into the editor or upload a `.py` file. It is validated in a separate process and saved to `checks/`. |
 | **Run** | M trials in total, N at a time, an optional seed and label. Batches above 20 trials show a token estimate first. A live progress view has cancel and resume. A batch keeps running if you close the browser. |
-| **Results** | A check summary per batch, a filterable trials table, and per trial: <ul><li>a turn-by-turn timeline;</li><li>the final files;</li><li>the checks, which you can re-run with the batch's copy or your current code;</li><li>the raw model calls;</li><li>the manifest and downloads.</li></ul> |
+| **Results** | A check summary per batch, with re-run checks (the batch's copy or your current code), and a filterable trials table. **Open ↗** opens a trial on its own page. |
+| **Trial** (from Results or Run) | One trial on its own page, in its own browser tab, with previous/next. The **Script** tab shows every step in order: what each agent received, what it wrote, each tool call and its result. It updates live while the trial runs, with filters, search, and a `.md` / `.html` download. Also the final files, checks, raw log and manifest. See [Reading one trial](docs/results.md#reading-one-trial-the-trial-script). |
 | **Settings** | API keys, saved to `.env` and tested with one small request; rate limits per provider. |
 
 ## Templates
@@ -125,6 +126,7 @@ Other commands:
 | `cancel <batch>` | Stops a running batch |
 | `status <batch>` | Shows a batch's progress |
 | `recheck <batch>` | Re-runs checks on saved trials, with no API calls |
+| `script <trial folder> [--format md\|html] [--out FILE]` | One trial as a readable script, in order |
 | `validate <scenario>` | Checks a scenario file and the code it uses |
 
 From Python or a notebook:

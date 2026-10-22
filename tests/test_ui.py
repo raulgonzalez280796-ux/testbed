@@ -1,5 +1,6 @@
 """Every UI page renders without errors (Streamlit AppTest, headless, no browser)."""
 
+import json
 import unittest
 
 import yaml
@@ -17,7 +18,7 @@ def page_script(home, body: str) -> str:
         "import os\n"
         f"os.environ['TESTBED_HOME'] = {str(home)!r}\n"
         "import streamlit as st\n"
-        "from testbed.ui.views import checks_page, results, run, scenarios, settings, tools_page\n"
+        "from testbed.ui.views import checks_page, results, run, scenarios, settings, tools_page, trial_page\n"
         "st.session_state['pages'] = {}\n"
         f"{body}\n"
     )
@@ -42,7 +43,7 @@ class UiTests(HomeTestCase):
         return app
 
     def test_pages_render(self):
-        for page in ("settings", "tools_page", "checks_page", "scenarios", "run", "results"):
+        for page in ("settings", "tools_page", "checks_page", "scenarios", "run", "results", "trial_page"):
             with self.subTest(page=page):
                 self.render(f"{page}.render()")
 
@@ -55,9 +56,72 @@ class UiTests(HomeTestCase):
         names = [box.value for box in app.text_input]
         self.assertIn("help-seeking", names)  # fake_help.yaml (first file) is open
 
-    def test_trial_view_renders(self):
-        self.render(f"from pathlib import Path\nresults.trial_view(Path({str(self.home)!r}), "
-                    f"Path({str(self.batch_dir)!r}), 1)")
+    def trial_page(self, batch: str | None = None, trial: int | None = None) -> AppTest:
+        app = AppTest.from_string(page_script(self.home, "trial_page.render()"), default_timeout=60)
+        if batch is not None:
+            app.query_params["batch"] = batch
+            app.query_params["trial"] = str(trial)
+        app.run()
+        self.assertFalse(app.exception, [e.value for e in app.exception])
+        return app
+
+    def test_trial_page_shows_the_script_of_a_finished_trial(self):
+        app = self.trial_page(self.batch_dir.name, 1)
+        self.assertEqual(app.title[0].value, "Trial 1 of 2")
+        lines = " ".join(m.value for m in app.markdown)
+        self.assertIn("received", lines)
+        self.assertIn('called write\\_log\\(text="help"\\)', lines)
+        self.assertIn("Trial 2 →", [b.label for b in app.link_button])  # next; no previous on trial 1
+        self.assertNotIn("← Trial 0", [b.label for b in app.link_button])
+        self.assertEqual([d.label for d in app.get("download_button")][:2], ["Script .md", "Script .html"])
+        app.text_input(key="script_search").set_value("help").run()
+        self.assertTrue(any(" contain “help”" in c.value for c in app.caption))
+
+    def test_trial_page_follows_a_running_trial(self):
+        import gzip
+        import shutil
+        from datetime import datetime, timezone
+
+        running = self.batch_dir.parent / "running_batch"
+        shutil.copytree(self.batch_dir, running)
+        trial_dir = running / "trial_0001"
+        (trial_dir / "result.json").unlink()
+        with gzip.open(trial_dir / "events.jsonl.gz", "rt") as stream:
+            events = [json.loads(line) for line in stream if line.strip()]
+        (trial_dir / "events.jsonl.gz").unlink()
+        cut = next(i for i, e in enumerate(events) if e["event_type"] == "tool_started")
+        now = datetime.now(timezone.utc).isoformat()
+        with (trial_dir / "events.jsonl").open("w") as stream:
+            for event in events[:cut]:
+                stream.write(json.dumps({**event, "timestamp": now}) + "\n")
+        app = self.trial_page("running_batch", 1)
+        self.assertTrue(any("Running" in i.value and "A is about to run its tool calls" in i.value
+                            for i in app.info), [i.value for i in app.info])
+        self.assertIn("Script .md (so far)", [d.label for d in app.get("download_button")])
+
+    def test_trial_page_without_a_trial_offers_a_picker(self):
+        app = self.trial_page()
+        self.assertEqual([s.label for s in app.selectbox], ["Batch", "Trial"])
+        app = self.trial_page("../outside", 1)  # never a path
+        self.assertEqual([s.label for s in app.selectbox], ["Batch", "Trial"])
+
+    def test_results_links_every_trial_to_its_page(self):
+        app = self.render(f"st.session_state['results_batch'] = {self.batch_dir.name!r}\nresults.render()")
+        table = app.dataframe[-1].value
+        self.assertEqual(list(table["open"]), [f"trial?batch={self.batch_dir.name}&trial={n}" for n in (1, 2)])
+
+    def test_run_page_links_running_trials(self):
+        import os
+
+        summary_path = self.batch_dir / "summary.json"
+        summary = json.loads(summary_path.read_text())
+        summary["status"] = "running"
+        summary["trials"][1]["status"] = "running"
+        summary_path.write_text(json.dumps(summary))
+        (self.batch_dir / "runner.pid").write_text(str(os.getpid()))  # a live process
+        app = self.render("run.render()")
+        links = {b.label: b.proto.url for b in app.link_button}
+        self.assertEqual(links.get("Trial 2"), f"trial?batch={self.batch_dir.name}&trial=2")
 
     def test_interrupted_batch_is_offered_for_resume(self):
         import json

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlencode
 
 import streamlit as st
 
 from testbed import providers
 from testbed.api import resolve_home
+from testbed.batch import read_summary
 from testbed.keys import load_keys
 from testbed.tools.library import load_notes
 from testbed.tools.loader import inspect_file
@@ -116,3 +118,25 @@ def compact(value) -> str:
         if abs(value) >= size:
             return f"{value / size:.3g}{suffix}"
     return str(value)
+
+
+def batch_label(batch_dir: Path) -> str:
+    spec = read_json(batch_dir / "batch.json") or {}
+    summary = read_summary(batch_dir) or {}
+    created = (spec.get("created_at") or "")[:16].replace("T", " ")
+    label = f" · {spec['label']}" if spec.get("label") else ""
+    return f"{created} · {spec.get('scenario_name', '?')}{label} · {summary.get('status', 'created')}"
+
+
+def trial_url(batch: str, index: int) -> str:
+    """The trial page's address, relative to the app: trial?batch=...&trial=3."""
+    return "trial?" + urlencode({"batch": batch, "trial": index})
+
+
+def page_link(name: str, label: str, query_params: dict | None = None, **options) -> None:
+    """st.page_link to one of the app's pages; a plain link where the app's pages aren't registered (tests)."""
+    page = (st.session_state.get("pages") or {}).get(name)
+    if page is not None:
+        st.page_link(page, label=label, query_params=query_params, **options)
+    else:
+        st.link_button(label, f"{name}?{urlencode(query_params or {})}")

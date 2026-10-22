@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+**The trial script: every step of a trial, in order, on its own page.**
+- **A trial page.** Each trial has its own page and link (`trial?batch=…&trial=N`).
+  - Open it from **Open ↗** in the Results trials table, or from a running trial's button on the Run page. It opens in a new browser tab, so several trials can be open at once.
+  - **← / →** go to the previous and next trial.
+  - Results no longer shows the trial inline.
+- **The Script tab** shows the trial in the log's order. Each step shows the time since the start, the agent, and what is new at that step:
+  - what the agent received: in conversation mode, the other agents' messages apart from the instruction; on its first turn, its system prompt and tools;
+  - what it wrote, verbatim, with tokens and duration;
+  - each tool call, with its arguments, result or error, file and action;
+  - retries, notes and turn ends.
+- **Live.** While a trial runs, the script refreshes every 2 seconds, and a "now" line says what is happening (for example "B is waiting for the model (8 s)"). **Follow the newest steps** keeps the latest steps in view.
+- **Filters and search** by agent, kind of step, tool, round and text. A **Raw events** switch shows the logged events under each step.
+- **Downloads:** the whole script as `.md` or `.html`. The same from the CLI: `python -m testbed script <trial folder> [--format md|html] [--out FILE]`.
+- `turn_started` events now also log `instruction`, and in conversation mode `messages` (each `{sender, round, text}`). `prompt` is unchanged.
+
 **One tools library.** Every tool is now a Python file in `tools/`, and one page manages them all.
 - A tool is one file holding one `@tool` function with the same name: `tools/read_log.py` is the tool `read_log`, and agents list tools by that name. `file:function` still works for older files that hold several tools.
 - New `@tool(file="log.txt", op="append")`:

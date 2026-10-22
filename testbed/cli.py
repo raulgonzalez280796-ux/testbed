@@ -5,6 +5,7 @@
   cancel BATCH_DIR                                      ask a running batch to stop
   status BATCH_DIR                                      print the batch summary
   recheck BATCH_DIR                                     re-run checks on saved trials (no API)
+  script TRIAL_DIR [--format md|html] [--out FILE]      one trial, step by step, in order
   validate SCENARIO                                     check the file and its tools/checks
   preview SCENARIO                                      what each agent will receive
   keys                                                  which provider keys are set
@@ -48,6 +49,10 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("validate", "preview"):
         sub = commands.add_parser(name)
         sub.add_argument("scenario")
+    script = commands.add_parser("script", help="one trial as a chronological script (Markdown or HTML)")
+    script.add_argument("trial_dir", help="a trial folder, e.g. runs/<batch>/trial_0001")
+    script.add_argument("--format", choices=("md", "html"), default="md")
+    script.add_argument("--out", help="write to this file instead of printing")
     commands.add_parser("keys")
     for name in ("schema", "reference"):
         sub = commands.add_parser(name)
@@ -227,6 +232,16 @@ def cmd_reference(args, home: Path) -> int:
     return _emit(render_reference(), args.out)
 
 
+def cmd_script(args, home: Path) -> int:
+    from .script import trial_script
+
+    trial_dir = Path(args.trial_dir)
+    if not (trial_dir / "manifest.json").exists():
+        print(f"{trial_dir} is not a trial folder (it has no manifest.json).", file=sys.stderr)
+        return 2
+    return _emit(trial_script(trial_dir, args.format), args.out)
+
+
 def cmd_init(args, home: Path) -> int:
     from .project import init_project
 
@@ -263,5 +278,5 @@ def cmd_ui(args, home: Path) -> int:
 COMMANDS = {
     "run": cmd_run, "resume": cmd_resume, "cancel": cmd_cancel, "status": cmd_status,
     "recheck": cmd_recheck, "validate": cmd_validate, "preview": cmd_preview, "keys": cmd_keys,
-    "init": cmd_init, "ui": cmd_ui, "schema": cmd_schema, "reference": cmd_reference,
+    "init": cmd_init, "ui": cmd_ui, "schema": cmd_schema, "reference": cmd_reference, "script": cmd_script,
 }
