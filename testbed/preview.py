@@ -6,6 +6,7 @@ import random
 from pathlib import Path
 
 from .scenario import Scenario, draw_variables, render, turn_one_text
+from .tools.builtin import scenario_tools
 from .tools.loader import resolve_agent_tools
 
 
@@ -18,8 +19,9 @@ def preview(home: Path, scenario: Scenario, seed: int = 0) -> dict:
     rng = random.Random(seed)
     values = draw_variables(scenario.variables, rng)
     agents = []
+    own_tools = scenario_tools(scenario)
     for spec in scenario.agents:
-        tools = resolve_agent_tools(spec.tools, home / "tools", spec.id)
+        tools = resolve_agent_tools(spec.tools, home / "tools", spec.id, own_tools)
         agents.append({
             "id": spec.id,
             "provider": spec.provider,

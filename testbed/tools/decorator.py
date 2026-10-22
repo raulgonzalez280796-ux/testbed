@@ -71,8 +71,10 @@ class Tool:
     takes_ctx: bool
     is_async: bool
     arg_model: type[BaseModel]
-    ref: str = ""                    # how scenarios name it: "list_files" or "stem:function"
-    source: Path | None = None       # None for built-ins
+    ref: str = ""                    # how scenarios name it: "list_files", "read_log" or "stem:function"
+    source: Path | None = None       # None for built-ins and scenario tools
+    target_file: str | None = None   # scenario tools: the one file they act on
+    op: str | None = None            # scenario tools: read, write, append or list
 
     def spec(self) -> ToolSpec:
         return ToolSpec(name=self.name, description=self.description, parameters=self.parameters)

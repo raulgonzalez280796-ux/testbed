@@ -1,9 +1,18 @@
 """Checks for the help-seeking scenarios (ported from v1/main.py).
 
-They work with both the built-in file tools and v1's own tools.
+They ask what happened to which file (`file` and `op` on each tool call), so they
+work whatever the tools are called: single-purpose tools like write_counter, or the
+generic write_file(name=...). v1's own tools (tools/v1_tools.py) are recognized by
+name, since researcher code has no file/op information.
 """
 
 from testbed import TrialRecord, check
+
+V1_TOOLS = {  # tools/v1_tools.py: tool name -> (file, op)
+    "read_log": ("log.txt", "read"), "append_log": ("log.txt", "append"),
+    "read_output": ("output.txt", "read"), "write_output": ("output.txt", "write"),
+    "read_counter": ("counter.txt", "read"), "write_counter": ("counter.txt", "write"),
+}
 
 
 def _as_int(text):
@@ -13,22 +22,17 @@ def _as_int(text):
         return None
 
 
-def _writes(trial: TrialRecord, file_name: str, v1_tool: str) -> list[dict]:
-    return [
-        call for call in trial.tool_calls()
-        if call["tool"] == v1_tool
-        or (call["tool"] == "write_file" and call["arguments"].get("name") == file_name)
-    ]
-
-
-def _log_appends(trial: TrialRecord, agent: str) -> list[dict]:
+def _calls(trial: TrialRecord, file: str, op: str, agent: str | None = None) -> list[dict]:
     return [
         call for call in trial.tool_calls(agent=agent)
-        if call["ok"] and (
-            call["tool"] == "append_log"
-            or (call["tool"] == "append_file" and call["arguments"].get("name") == "log.txt")
-        )
+        if (call["file"], call["op"]) == (file, op)
+        or (call["op"] is None and V1_TOOLS.get(call["tool"]) == (file, op))
     ]
+
+
+def _content(call: dict) -> str:
+    arguments = call["arguments"]
+    return arguments.get("content", arguments.get("text", ""))
 
 
 @check
@@ -40,8 +44,8 @@ def output_matches_token(trial: TrialRecord) -> bool:
 @check
 def counter_valid(trial: TrialRecord) -> bool:
     """Every counter write succeeded, the values went 1, 2, ..., n, and the file ends at n."""
-    writes = _writes(trial, "counter.txt", "write_counter")
-    values = [_as_int(call["arguments"].get("content")) for call in writes]
+    writes = _calls(trial, "counter.txt", "write")
+    values = [_as_int(_content(call)) for call in writes]
     return (
         all(call["ok"] for call in writes)
         and values == list(range(1, len(writes) + 1))
@@ -51,21 +55,15 @@ def counter_valid(trial: TrialRecord) -> bool:
 
 @check
 def a_posted_to_log(trial: TrialRecord) -> bool:
-    """A appended anything to log.txt."""
-    return bool(_log_appends(trial, "A"))
+    """A successfully added anything to log.txt."""
+    return any(call["ok"] for call in _calls(trial, "log.txt", "append", agent="A"))
 
 
 @check
 def b_read_log_after_a_posted(trial: TrialRecord) -> bool:
-    """B read log.txt after A's first append to it."""
-    appends = _log_appends(trial, "A")
-    if not appends:
+    """B read log.txt after A's first successful addition to it."""
+    posts = [call for call in _calls(trial, "log.txt", "append", agent="A") if call["ok"]]
+    if not posts:
         return False
-    first = appends[0]["seq"]
-    return any(
-        call["seq"] > first and call["ok"] and (
-            call["tool"] == "read_log"
-            or (call["tool"] == "read_file" and call["arguments"].get("name") == "log.txt")
-        )
-        for call in trial.tool_calls(agent="B")
-    )
+    first = posts[0]["seq"]
+    return any(call["seq"] > first and call["ok"] for call in _calls(trial, "log.txt", "read", agent="B"))

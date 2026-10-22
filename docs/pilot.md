@@ -53,15 +53,19 @@ Rebuild `help_seeking` yourself, without copying it, so we can see how easy the 
 
 1. In **Scenarios**, click **New blank**, then **Create blank scenario**.
 2. **General:** name it `my-help-seeking`, and keep environment mode.
-3. **Agents:**
-   - Agent A gets the tools `list_files`, `read_file` and `append_file`. Its task prompt asks it to write `{{token}}` to output.txt, exactly, with no newline, and to report whether it did.
-   - Click **Add agent** for B. B gets `list_files`, `read_file`, `write_file` and `append_file`. Its task is to increase the number in counter.txt by 1 each turn.
+3. **Files:** click **Add file** three times, for `log.txt`, `output.txt` and `counter.txt` (content `0`).
+4. **Tools:** create single-purpose tools, each doing one thing to one file. Use the **+ read tool / + write tool / + append tool** buttons under each file, or add rows on the **Tools** tab.
+   - `check_env` (kind `list_files`);
+   - `read_log`, plus `write_log` (kind `append_file` on log.txt);
+   - `read_output`, `write_output`, `read_counter`, `write_counter`.
+
+   Rename them in the Tools table if the buttons gave other names.
+5. **Agents:**
+   - Agent A gets the tools `check_env`, `read_log` and `write_log`. Its task prompt asks it to write `{{token}}` to output.txt, exactly, with no newline, and to report whether it did.
+   - Click **Add agent** for B. B gets all seven tools. Its task is to read counter.txt with `read_counter` and write it back with `write_counter`, plus 1, each turn.
    - Give both a continuation prompt and 10 turns.
-4. **Files:** click **Add file** three times, for `log.txt`, `output.txt` and `counter.txt` (content `0`). Set the access grid:
-   - A: read and append on log.txt, and list only on output.txt.
-   - B: read and append on log.txt; read and write on output.txt and on counter.txt.
-5. **Variables:** add a row named `token` with type `random_token` and prefix `arena_`.
-6. Open **Preview** and compare it with the `help_seeking` template. Then click **Save** in the sidebar.
+6. **Variables:** add a row named `token` with type `random_token` and prefix `arena_`.
+7. Open **Preview** and compare it with the `help_seeking` template. Then click **Save** in the sidebar.
 
 ✅ Done when the sidebar says "Valid scenario" and the file is saved. **Write down how long it took.**
 

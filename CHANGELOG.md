@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**Single-purpose tools.**
+- A scenario's new `tools:` section declares named tools that each do one action on one file, for example `read_log`, `write_log` or `write_counter`. The kinds are `read_file`, `write_file`, `append_file` and `list_files` (optionally limited to some files).
+- These tools take no file name, so a tool can never reach another file, and giving it to an agent is the permission. Names and descriptions are yours.
+- In the UI: a **Tools** tab in the scenario editor, and "+ read / write / append tool" buttons under each file. The agents' tool picker lists scenario tools first.
+- An agent's tools may mix single-purpose tools, the generic built-ins and researcher code.
+- Tool events and `TrialRecord.tool_calls()` now carry `file` and `op` (read, write, append, list), so checks can ask what happened to a file, whatever the tool is called.
+- The `help_seeking` template now uses these tools: A has `check_env`, `read_log` and `write_log`; B also has `read_output`, `write_output`, `read_counter` and `write_counter`. Its checks use `file`/`op`.
+
 ## 0.1.0 (2026-10-22): first version
 
 The first complete version of the llmArena testbed: controlled experiments with several LLM agents, set up in one YAML file or in a local web UI.

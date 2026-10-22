@@ -6,7 +6,7 @@ The four templates (`python -m testbed init` copies them into a project) are wor
 
 | Template | Shows |
 |---|---|
-| `help_seeking` | environment mode, asymmetric file access, built-in tools only |
+| `help_seeking` | environment mode, single-purpose tools (each tool = one action on one file), no code |
 | `help_seeking_v1` | researcher tools that reproduce another tool set exactly (`tools/v1_tools.py`) |
 | `secret_keeper` | conversation mode, a researcher tool that ends the trial, a hidden sender (`conversation_format: "{text}"`) |
 | `negotiation` | conversation mode, private per-trial values, shared tool state (`ctx.state`) |
@@ -46,9 +46,45 @@ The four templates (`python -m testbed init` copies them into a project) are wor
 
 The testbed adds no instructions of its own, so **tell each agent in its prompt that what it writes is sent to the others** (for example: "everything you write is sent to the buyer, and their messages will appear here"). Without that, an agent that speaks first may conclude it has no way to communicate, as an early live run of `secret_keeper` showed.
 
-## Files and access
+## Tools: three kinds
 
-Each file has an **access table**: agent id (or `*` for everyone) → operations for the built-in file tools.
+An agent's `tools` list can mix three kinds of tool. The model sees a name, a description and the arguments of each; nothing else.
+
+| Kind | Example | Use it when |
+|---|---|---|
+| **Single-purpose tools** (`tools:` in the scenario) | `read_log`, `write_log` | Each tool should do one thing to one file, as in v1. No code. |
+| **Generic file tools** (built in) | `read_file(name)`, `write_file(name, content)` | One general tool should work on several files, with permissions per agent in the access grid |
+| **Researcher tools** (your Python code) | `negotiation:make_offer` | The tool needs logic: rules, scores, shared state, ending the trial |
+
+### Single-purpose tools
+
+Declare them once in the scenario's `tools:` section (the UI's **Tools** tab, or the "+ read tool / + write tool / + append tool" buttons under each file on the **Files** tab), then give them to agents by name:
+
+```yaml
+tools:
+  - {name: check_env,    kind: list_files}                  # every file name in the workspace
+  - {name: read_log,     kind: read_file,   file: log.txt}
+  - {name: write_log,    kind: append_file, file: log.txt}   # adds a line; history is kept
+  - {name: write_output, kind: write_file,  file: output.txt}
+agents:
+  - id: A
+    tools: [check_env, read_log, write_log]
+```
+
+| Kind | Arguments the model fills in | Does |
+|---|---|---|
+| `read_file` | none | Returns the file's content |
+| `write_file` | `content` | Replaces the file's content |
+| `append_file` | `text` | Adds the text and a newline at the end |
+| `list_files` | none | Lists file names. `files: [...]` limits what it shows; without it, every file in the workspace is listed. |
+
+None of them takes a file name: the file is fixed when you declare the tool, so a tool can never reach another file. **Giving the tool to an agent is the permission**; the access grid plays no part. `description` is optional. The default follows v1's wording, e.g. "Read the UTF-8 contents of log.txt.". Because the name and the description are part of what the agent experiences, both are yours to choose, and both are recorded in each trial's manifest.
+
+A scenario tool with the same name as a built-in (for example `list_files`) replaces the built-in for that scenario.
+
+### Generic file tools and the access grid
+
+`list_files`, `read_file(name)`, `write_file(name, content)` and `append_file(name, text)` take a file name. What each agent may do is set per file in the **access table**: agent id (or `*` for everyone) → operations.
 
 | Operation | Lets the agent |
 |---|---|
@@ -57,13 +93,13 @@ Each file has an **access table**: agent id (or `*` for everyone) → operations
 | `write` | `write_file` (replace the content) |
 | `append` | `append_file` (adds the text and a newline) |
 
-Any operation also makes the file show up in `list_files`. A refused call returns an error to the model, such as "You do not have permission to write 'log.txt'.", and the error is logged. A name the agent has no access to at all gets "No accessible file named …", whether or not the file exists.
+Any operation also makes the file show up in the generic `list_files`. A refused call returns an error to the model, such as "You do not have permission to write 'log.txt'.", and the error is logged. A name the agent has no access to at all gets "No accessible file named …", whether or not the file exists.
 
 Files may only be named, never given a path. `limits.max_file_bytes` and `limits.max_tool_input_bytes` cap sizes. Researcher tools can reach every file through `ctx.files`, regardless of the table; your tool decides.
 
-## Writing a tool
+## Writing a researcher tool
 
-A tool is a Python function in `tools/<file>.py`, marked with `@tool`. Scenarios refer to it as `file:function`, e.g. `negotiation:make_offer`. Add tools on the UI's Tools & checks page (paste or upload), or put the file in `tools/` yourself.
+A researcher tool is a Python function in `tools/<file>.py`, marked with `@tool`. Scenarios refer to it as `file:function`, e.g. `negotiation:make_offer`. Add tools on the UI's Tools & checks page (paste or upload), or put the file in `tools/` yourself.
 
 ```python
 from typing import Annotated
@@ -130,7 +166,7 @@ def output_matches_token(trial: TrialRecord) -> bool:
 |---|---|
 | `trial.files` | final workspace contents, name → text |
 | `trial.variables` | the trial's variable values |
-| `trial.tool_calls(agent=None, tool=None)` | tool calls in order: `{agent, tool, arguments, round, seq, ok, result}` |
+| `trial.tool_calls(agent=None, tool=None, file=None, op=None)` | tool calls in order: `{agent, tool, arguments, file, op, round, seq, ok, result}`. `file` and `op` (read, write, append, list) are filled in for single-purpose and generic file tools, so "did A append to log.txt?" is `trial.tool_calls(agent="A", file="log.txt", op="append")`, whatever the tool is called. |
 | `trial.messages(agent=None)` | each agent's message per turn: `{agent, round, text}` |
 | `trial.events` / `trial.events_of(type)` | the raw event log (see [results](results.md)) |
 | `trial.manifest` | everything the agents were given |

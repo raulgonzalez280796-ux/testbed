@@ -15,13 +15,14 @@ from annotated_types import Ge, Gt, Le, MinLen
 from pydantic import BaseModel
 
 from .scenario import (
-    AgentSpec, BudgetSpec, FileSpec, LimitsSpec, Scenario, ScheduleSpec, VariableSpec,
+    AgentSpec, BudgetSpec, FileSpec, LimitsSpec, Scenario, ScheduleSpec, ToolDef, VariableSpec,
 )
 
 SECTIONS: list[tuple[str, type[BaseModel], str]] = [
     ("Scenario", Scenario, "The top level of the YAML file."),
     ("Agent", AgentSpec, "Each item of `agents`."),
     ("File", FileSpec, "Each item of `files`."),
+    ("Tool", ToolDef, "Each item of `tools`."),
     ("Variable", VariableSpec, "Each value of `variables` (the key is the variable's name)."),
     ("Schedule", ScheduleSpec, "`schedule`."),
     ("Budget", BudgetSpec, "`budget`."),
@@ -38,22 +39,24 @@ variables:
 files:
   - name: notes.txt
     content: "Token: {{token}}"
-    access: {A: [read], B: [read, append]}
+tools:                            # single-purpose tools: one action on one file
+  - {name: read_notes, kind: read_file, file: notes.txt}
+  - {name: add_note, kind: append_file, file: notes.txt}
 agents:
   - id: A
     provider: anthropic
     model: claude-haiku-5-5
-    task_prompt: Read notes.txt and tell B what it says.
+    task_prompt: Read the notes and pass on what they say.
     continuation_prompt: Continue.
     turns: 3
-    tools: [read_file]
+    tools: [read_notes]
   - id: B
     provider: openai
     model: gpt-6-luna
-    task_prompt: Wait for information in notes.txt, then summarize it.
+    task_prompt: Summarize what you learn in the notes.
     continuation_prompt: Continue.
     turns: 3
-    tools: [read_file, append_file]
+    tools: [read_notes, add_note]
 checks: [my_checks:token_was_shared]
 budget: {max_trial_tokens: 200000}
 """
@@ -140,6 +143,11 @@ def render_reference() -> str:
         "- Agent ids and file names are unique.",
         "- `schedule.order`, if set, lists every agent exactly once.",
         "- `files[].access` names only existing agents, or `*`.",
+        "- Tool names are unique. A read_file, write_file or append_file tool names one of the "
+        "scenario's files in `file`; a list_files tool may limit itself with `files`.",
+        "- Every name in an agent's `tools` is a tool from `tools`, a built-in tool or "
+        "researcher code (`file:function`). A `tools` entry with the same name as a built-in "
+        "replaces it.",
         "- Every `{{variable}}` used in a prompt or file content is defined in `variables`.",
         "- In environment mode, every agent has a turn-1 input (`shared_task` or its "
         "`task_prompt`), and an agent with more than one turn has a `continuation_prompt`.",
@@ -147,7 +155,8 @@ def render_reference() -> str:
         "",
     ]
     for title, model, where in SECTIONS:
-        lines += [f"## {title}", "", f"{where} {(model.__doc__ or '').strip()}", ""]
+        intro = " ".join((model.__doc__ or "").split())  # docstrings may wrap over lines
+        lines += [f"## {title}", "", f"{where} {intro}", ""]
         lines += table(model)
         lines.append("")
     return "\n".join(lines)

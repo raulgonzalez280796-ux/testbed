@@ -110,7 +110,7 @@ class EditorRegressionTests(HomeTestCase):
         self.assertEqual(data["schedule"]["order"], ["A", "B", "C"])
         # The template had comments, so the original was kept once as a .bak.
         backup = self.home / "scenarios" / "help_seeking.yaml.bak"
-        self.assertTrue(backup.read_text().startswith("# Template based on the v1 experiment"))
+        self.assertTrue(backup.read_text().startswith("# The v1 experiment, built without code"))
 
     def test_save_as_copy_and_discard(self):
         app = self.editor(self.home / "scenarios" / "negotiation.yaml")
@@ -158,6 +158,29 @@ class EditorRegressionTests(HomeTestCase):
         app = self.editor(self.home / "scenarios" / "negotiation.yaml")
         sidebar = " ".join(element.value for element in app.sidebar.markdown)
         self.assertNotIn("unsaved changes", sidebar)
+
+    def test_quick_add_a_file_tool_and_give_it_to_an_agent(self):
+        app = self.editor(self.home / "scenarios" / "negotiation.yaml")
+        next(b for b in app.button if b.label == "+ read tool").click().run()
+        self.assertFalse(app.exception, [e.value for e in app.exception])
+        self.assertEqual(app.session_state["editor"]["data"]["tools"],
+                         [{"name": "read_deal", "kind": "read_file", "file": "deal.txt"}])
+        picker = next(m for m in app.multiselect if m.label == "Tools")  # the Seller's
+        self.assertIn("read_deal — reads deal.txt", picker.options)  # shown first, with what it does
+        picker.set_value(list(picker.value) + ["read_deal"]).run()
+        self.assertEqual(self.problems(app), [])
+        next(b for b in app.button if b.label == "Save").click().run()
+        saved = self.saved("negotiation.yaml")
+        self.assertEqual(saved["tools"], [{"name": "read_deal", "kind": "read_file", "file": "deal.txt"}])
+        self.assertIn("read_deal", saved["agents"][0]["tools"])
+
+    def test_help_seeking_shows_its_single_purpose_tools(self):
+        app = self.editor(self.home / "scenarios" / "help_seeking.yaml")
+        pickers = [m for m in app.multiselect if m.label == "Tools"]
+        self.assertEqual([list(m.value) for m in pickers], [
+            ["check_env", "read_log", "write_log"],
+            ["check_env", "read_log", "write_log", "read_output", "write_output", "read_counter", "write_counter"],
+        ])
 
     def test_next_id_after_z(self):
         from testbed.ui.views.scenarios import next_id

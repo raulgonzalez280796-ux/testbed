@@ -60,8 +60,16 @@ class TrialRecord:
             events=read_events(trial_dir), manifest=manifest, status=status,
         )
 
-    def tool_calls(self, agent: str | None = None, tool: str | None = None) -> list[dict]:
-        """Tool calls in order: {agent, tool, arguments, ok, result, round, seq}."""
+    def tool_calls(
+        self, agent: str | None = None, tool: str | None = None,
+        file: str | None = None, op: str | None = None,
+    ) -> list[dict]:
+        """Tool calls in order: {agent, tool, arguments, file, op, ok, result, round, seq}.
+
+        `file` and `op` (read, write, append, list) are known for single-purpose and
+        built-in file tools, so you can ask "who appended to log.txt?" whatever the tool
+        is called.
+        """
         calls, pending = [], {}
         for event in self.events:
             data = event["data"]
@@ -69,6 +77,7 @@ class TrialRecord:
                 pending[data["call_id"]] = {
                     "agent": data["agent_id"], "tool": data["tool"],
                     "arguments": data.get("arguments", {}), "round": data.get("round"),
+                    "file": data.get("file"), "op": data.get("op"),
                     "seq": event["seq"], "ok": None, "result": None,
                 }
                 calls.append(pending[data["call_id"]])
@@ -80,6 +89,7 @@ class TrialRecord:
         return [
             call for call in calls
             if (agent is None or call["agent"] == agent) and (tool is None or call["tool"] == tool)
+            and (file is None or call["file"] == file) and (op is None or call["op"] == op)
         ]
 
     def messages(self, agent: str | None = None) -> list[dict]:

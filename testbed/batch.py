@@ -19,6 +19,7 @@ from pathlib import Path
 
 from ._version import __version__
 from .scenario import Scenario, load_scenario, save_scenario, scenario_hash
+from .tools.builtin import scenario_tools
 from .tools.loader import resolve_agent_tools, resolve_check
 from .trial import copy_code, now, write_json
 
@@ -31,8 +32,9 @@ def new_batch_id() -> str:
 
 def validate_code(home: Path, scenario: Scenario) -> None:
     """Fail before any API call if a referenced tool or check cannot be loaded."""
+    own_tools = scenario_tools(scenario)
     for agent in scenario.agents:
-        resolve_agent_tools(agent.tools, home / "tools", agent.id)
+        resolve_agent_tools(agent.tools, home / "tools", agent.id, own_tools)
     for ref in scenario.checks:
         resolve_check(ref, home / "checks")
 

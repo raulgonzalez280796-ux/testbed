@@ -150,6 +150,33 @@ class LimitsSpec(Spec):
         description="Longest wait between retries when the provider gives no retry-after.")
 
 
+ToolKind = Literal["read_file", "write_file", "append_file", "list_files"]
+FILE_KINDS = ("read_file", "write_file", "append_file")
+
+
+class ToolDef(Spec):
+    """A single-purpose tool for this scenario: one action on one file, under your own name.
+    It takes no file name, so it can never reach another file; giving it to an agent is
+    the permission."""
+
+    name: str = Field(
+        pattern=r"^[A-Za-z][A-Za-z0-9_]{0,63}$",
+        description=("The name the model sees, e.g. read_log: a letter, then letters, digits "
+                     "or '_'. Agents list it in their tools."))
+    kind: ToolKind = Field(
+        description=("read_file returns the file; write_file replaces it (argument: content); "
+                     "append_file adds text and a newline (argument: text); list_files lists "
+                     "file names."))
+    file: str | None = Field(
+        None, description="read_file, write_file, append_file: the one file this tool works on.")
+    files: list[str] | None = Field(
+        None, description=("list_files: the file names it may show. Empty means every file "
+                           "in the workspace."))
+    description: str = Field(
+        "", description=("What the model is told the tool does. Empty means a standard "
+                         "description, e.g. 'Read the UTF-8 contents of log.txt.'"))
+
+
 class Scenario(Spec):
     """A complete experiment setup: one YAML file in scenarios/."""
 
@@ -176,6 +203,10 @@ class Scenario(Spec):
     variables: dict[str, VariableSpec] = Field(
         {}, description="Per-trial values, inserted with {{name}} in prompts and file contents.")
     files: list[FileSpec] = Field([], description="The workspace files every trial starts with.")
+    tools: list[ToolDef] = Field(
+        [], description=("Single-purpose tools for this scenario (one action on one file), "
+                         "named by you. Agents list them by name next to built-in and "
+                         "researcher tools."))
     agents: list[AgentSpec] = Field(min_length=1, description="At least one agent.")
     checks: list[str] = Field(
         [], description="file:function for researcher checks in checks/, run after every trial.")
@@ -211,6 +242,24 @@ class Scenario(Spec):
             unknown = set(spec.access) - set(ids) - {ALL_AGENTS}
             if unknown:
                 raise ValueError(f"file {spec.name!r}: access names unknown agents {sorted(unknown)}")
+        tool_names = [tool.name for tool in self.tools]
+        repeated = sorted({name for name in tool_names if tool_names.count(name) > 1})
+        if repeated:
+            raise ValueError(f"tool names must be unique: {repeated}")
+        for tool in self.tools:
+            if tool.kind in FILE_KINDS:
+                if not tool.file:
+                    raise ValueError(f"tool {tool.name!r} ({tool.kind}) needs a file")
+                if tool.file not in names:
+                    raise ValueError(f"tool {tool.name!r}: {tool.file!r} is not one of the scenario's files")
+                if tool.files is not None:
+                    raise ValueError(f"tool {tool.name!r}: 'files' is only for list_files; use 'file'")
+            else:
+                if tool.file is not None:
+                    raise ValueError(f"tool {tool.name!r}: list_files takes 'files' (a list), not 'file'")
+                unknown = sorted(set(tool.files or []) - set(names))
+                if unknown:
+                    raise ValueError(f"tool {tool.name!r}: {unknown} are not the scenario's files")
         for text, where in self.template_fields():
             for name in TEMPLATE.findall(text):
                 if name not in self.variables:

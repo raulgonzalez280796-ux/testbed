@@ -76,9 +76,17 @@ def split_ref(ref: str) -> tuple[str, str]:
     return stem, function
 
 
-def resolve_tool(ref: str, tools_dir: Path) -> Tool:
+def resolve_tool(ref: str, tools_dir: Path, scenario_tools: dict[str, Tool] | None = None) -> Tool:
+    """A scenario's own tools first, then built-ins, then researcher code ("file:function")."""
+    if scenario_tools and ref in scenario_tools:
+        return scenario_tools[ref]
     if ref in BUILTIN_TOOLS:
         return BUILTIN_TOOLS[ref]
+    if ":" not in ref:
+        raise CodeError(
+            f"no tool called {ref!r}: not a tool in the scenario's tools section, not a "
+            f"built-in tool, and not researcher code (file:function)"
+        )
     stem, function = split_ref(ref)
     path = tools_dir / f"{stem}.py"
     if not path.is_file():
@@ -100,11 +108,14 @@ def resolve_check(ref: str, checks_dir: Path):
     return found[function]
 
 
-def resolve_agent_tools(refs: list[str], tools_dir: Path, agent_id: str) -> dict[str, Tool]:
+def resolve_agent_tools(
+    refs: list[str], tools_dir: Path, agent_id: str,
+    scenario_tools: dict[str, Tool] | None = None,
+) -> dict[str, Tool]:
     """Exposed tool name -> Tool for one agent. Two tools may not share a name."""
     tools: dict[str, Tool] = {}
     for ref in refs:
-        resolved = resolve_tool(ref, tools_dir)
+        resolved = resolve_tool(ref, tools_dir, scenario_tools)
         if resolved.name in tools:
             raise CodeError(
                 f"agent {agent_id}: two tools are both called {resolved.name!r} "
@@ -115,7 +126,8 @@ def resolve_agent_tools(refs: list[str], tools_dir: Path, agent_id: str) -> dict
 
 
 def referenced_files(refs: list[str]) -> set[str]:
-    return {split_ref(ref)[0] for ref in refs if ref not in BUILTIN_TOOLS}
+    """Researcher code files ("file:function") among tool refs; other names are not files."""
+    return {split_ref(ref)[0] for ref in refs if ":" in ref}
 
 
 def file_sha256(path: Path) -> str:

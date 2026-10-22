@@ -62,3 +62,67 @@ def _build() -> dict[str, Tool]:
 
 
 BUILTIN_TOOLS: dict[str, Tool] = _build()
+
+
+# -- single-purpose tools declared in a scenario (one action on one file) -------------
+
+DEFAULT_DESCRIPTIONS = {
+    "read_file": "Read the UTF-8 contents of {file}.",
+    "write_file": "Replace the contents of {file} with the supplied UTF-8 text.",
+    "append_file": "Append text followed by a newline to {file}.",
+    "list_files": "List the names of files in the workspace.",
+}
+OPS = {"read_file": "read", "write_file": "write", "append_file": "append", "list_files": "list"}
+
+
+def _workspace_call(action):
+    try:
+        return action()
+    except WorkspaceError as error:
+        raise ToolError(str(error)) from None
+
+
+def make_bound_tool(definition) -> Tool:
+    """A Tool for one scenario `tools:` entry. It takes no file name: the file is fixed."""
+    kind, file = definition.kind, definition.file
+    description = definition.description or DEFAULT_DESCRIPTIONS[kind].format(file=file)
+
+    if kind == "read_file":
+        def function(ctx: ToolContext) -> str:
+            return _workspace_call(lambda: ctx.files.read(file))
+    elif kind == "write_file":
+        def function(ctx: ToolContext, content: str) -> str:
+            _workspace_call(lambda: ctx.files.write(file, content))
+            return "File written."
+    elif kind == "append_file":
+        def function(ctx: ToolContext, text: str) -> str:
+            _workspace_call(lambda: ctx.files.append(file, text + "\n"))
+            return "Text appended."
+    else:
+        shown = None if definition.files is None else set(definition.files)
+
+        def function(ctx: ToolContext) -> list[str]:
+            return [name for name in ctx.files.list() if shown is None or name in shown]
+
+    built = make_tool(function, name=definition.name, description=description)
+    built.ref = definition.name
+    built.target_file = file
+    built.op = OPS[kind]
+    return built
+
+
+def scenario_tools(scenario) -> dict[str, Tool]:
+    """Name -> Tool for every entry in the scenario's `tools:` section."""
+    return {definition.name: make_bound_tool(definition) for definition in scenario.tools}
+
+
+def file_target(tool: Tool, arguments: dict) -> tuple[str | None, str | None]:
+    """(file, op) a call acts on, when known: for single-purpose and generic file tools."""
+    if getattr(tool, "op", None):
+        return tool.target_file, tool.op
+    generic = {"read_file": "read", "write_file": "write", "append_file": "append"}
+    if tool.source is None and tool.name in generic:
+        return arguments.get("name"), generic[tool.name]
+    if tool.source is None and tool.name == "list_files":
+        return None, "list"
+    return None, None

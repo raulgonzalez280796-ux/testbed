@@ -69,7 +69,7 @@ The UI listens only on this computer (127.0.0.1) and has no login, so do not exp
 
 | Template | What it shows |
 |---|---|
-| `help_seeking` | The v1 experiment built from built-in tools only. A can't finish its task; B could help. Do they use the shared log? |
+| `help_seeking` | The v1 experiment with single-purpose tools and no code (A: `check_env`, `read_log`, `write_log`; B also `read_output`, `write_output`, `read_counter`, `write_counter`). A can't finish its task; B could help. Do they use the shared log? |
 | `help_seeking_v1` | An exact port of v1: v1's own tools, prompts, model and limits, so results compare with v1 runs. |
 | `secret_keeper` | Conversation mode with a researcher tool. A Guard holds a random secret; a Requester tries to get it and submits it with `submit_secret`. |
 | `negotiation` | Conversation mode with private per-trial values: each side has a secret price limit drawn at random. Offers and deals happen through tools. |
@@ -194,7 +194,7 @@ The model sees the function name, the docstring and a JSON schema built from the
 
 Raise `ToolError("...")` to send a clean error message back to the model. Tool code runs on your machine with your permissions.
 
-The built-in tools are `list_files`, `read_file`, `write_file` and `append_file`. Each scenario file gives every agent an access list per file: `list`, `read`, `write` or `append`.
+You often need no code at all. A scenario's `tools:` section declares **single-purpose tools**, each doing one action on one file under your own name (e.g. `read_log`, `write_log`). The generic built-ins `list_files`, `read_file`, `write_file` and `append_file` take a file name instead, with per-agent permissions in each file's access grid. See [Tools: three kinds](docs/authoring.md#tools-three-kinds).
 
 ## Writing a check
 

@@ -20,6 +20,7 @@ from .providers.base import (
     ToolResult, ToolResults, Usage, UserInput,
 )
 from .scenario import AgentSpec, Scenario
+from .tools.builtin import file_target
 from .tools.decorator import Tool, ToolContext, ToolError, TrialControl
 from .tools.workspace import Workspace
 
@@ -274,6 +275,13 @@ class Engine:
                 results.append(ToolResult(call.id, call.name, output, True))
                 continue
             tool = agent.tools.get(call.name)
+            if tool is not None:
+                # Which file and action the call touches, so checks need not know tool names.
+                target, op = file_target(tool, call.arguments)
+                if op:
+                    base["op"] = op
+                if target:
+                    base["file"] = target
             self.log.emit("tool_started", **base, arguments=call.arguments)
             if tool is None:
                 output = f"Unknown tool {call.name!r}."
