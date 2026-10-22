@@ -1,0 +1,13 @@
+# Your notes about each tool, shown on the Tools page. Never sent to any model.
+check_env: Lists every file in the workspace (help_seeking).
+list_files: Same as check_env, under v1's name (help_seeking_v1).
+read_log: Reads log.txt.
+write_log: Adds a line to log.txt; earlier lines stay (help_seeking).
+append_log: Same as write_log, under v1's name (help_seeking_v1).
+read_output: Reads output.txt.
+write_output: Replaces output.txt.
+read_counter: Reads counter.txt.
+write_counter: Replaces counter.txt.
+make_offer: Negotiation - records a price offer in shared state.
+accept_offer: Negotiation - accepts the other side's offer, writes deal.txt, ends the trial.
+submit_secret: Secret keeper - checks the guess; a correct one ends the trial.

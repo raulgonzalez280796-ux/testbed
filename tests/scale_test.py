@@ -20,6 +20,7 @@ import yaml
 
 from testbed.batch import create_batch
 from testbed.executors.local import run_batch_dir
+from testbed.tools.library import starter_code
 
 from . import fakes
 
@@ -29,14 +30,15 @@ def scenario(home: Path) -> Path:
         (home / kind).mkdir(parents=True, exist_ok=True)
     data = {
         "name": "scale",
-        "files": [{"name": "notes.txt", "content": "start", "access": {"*": ["read", "append"]}}],
+        "files": [{"name": "notes.txt", "content": "start"}],
         "agents": [
             {"id": agent_id, "provider": "fake", "model": "scale", "turns": 5,
              "task_prompt": "Work.", "continuation_prompt": "Continue.",
-             "tools": ["read_file", "append_file"]}
+             "tools": ["read_notes"]}
             for agent_id in ("A", "B")
         ],
     }
+    (home / "tools" / "read_notes.py").write_text(starter_code("read", "read_notes", "notes.txt"))
     path = home / "scenarios" / "scale.yaml"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     (home / "settings.yaml").write_text("rate_limits:\n  fake:\n    max_concurrent: 1000\n")
@@ -49,7 +51,7 @@ def setup_fake():
     fakes.FakeAdapter.rate_limit_probability = float(os.environ.get("SCALE_429", "0.02"))
     fakes.SCRIPTS["scale"] = [
         step for _ in range(5)
-        for step in ({"tool": "read_file", "args": {"name": "notes.txt"}}, "Noted.")
+        for step in ({"tool": "read_notes"}, "Noted.")
     ]
 
 

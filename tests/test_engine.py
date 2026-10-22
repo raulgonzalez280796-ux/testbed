@@ -11,15 +11,10 @@ from testbed.scenario import Scenario
 from . import fakes
 from .helpers import HomeTestCase, agent
 
-ONLY_A_FILES = [
-    {"name": "log.txt", "access": {"A": ["read", "append"]}},
-    {"name": "output.txt", "access": {"A": ["list"]}},
-    {"name": "counter.txt", "content": "0"},
-]
 HELP_FILES = [
-    {"name": "log.txt", "access": {"A": ["read", "append"], "B": ["read", "append"]}},
-    {"name": "output.txt", "access": {"A": ["list"], "B": ["read", "write"]}},
-    {"name": "counter.txt", "content": "0", "access": {"B": ["read", "write"]}},
+    {"name": "log.txt"},
+    {"name": "output.txt"},
+    {"name": "counter.txt", "content": "0"},
 ]
 
 
@@ -32,9 +27,11 @@ class ScenarioValidationTests(unittest.TestCase):
     def test_valid(self):
         Scenario.model_validate(self.base())
 
-    def test_unknown_agent_in_file_access(self):
-        with self.assertRaisesRegex(ValidationError, "unknown agents"):
-            Scenario.model_validate(self.base(files=[{"name": "x.txt", "access": {"Z": ["read"]}}]))
+    def test_removed_fields_explain_the_change(self):
+        with self.assertRaisesRegex(ValidationError, "'access' was removed"):
+            Scenario.model_validate(self.base(files=[{"name": "x.txt", "access": {"A": ["read"]}}]))
+        with self.assertRaisesRegex(ValidationError, "'tools:' section was removed"):
+            Scenario.model_validate(self.base(tools=[{"name": "read_x", "kind": "read_file", "file": "x.txt"}]))
 
     def test_undefined_variable(self):
         with self.assertRaisesRegex(ValidationError, "not a defined variable"):
@@ -65,31 +62,38 @@ class ScenarioValidationTests(unittest.TestCase):
 
 
 class EngineTests(HomeTestCase):
-    async def test_file_access_is_enforced(self):
-        fakes.SCRIPTS["script-A"] = [
-            {"tools": [
-                {"tool": "list_files"},
-                {"tool": "read_file", "args": {"name": "counter.txt"}},
-                {"tool": "read_file", "args": {"name": "output.txt"}},
-                {"tool": "write_file", "args": {"name": "log.txt", "content": "x"}},
-                {"tool": "append_file", "args": {"name": "log.txt", "text": "hello"}},
-            ]},
-        ]
-        path = self.scenario(files=ONLY_A_FILES, agents=[agent(
-            "A", turns=1, tools=["list_files", "read_file", "write_file", "append_file"])])
+    async def test_a_tool_reaches_only_the_file_it_declares(self):
+        self.write_code("tools", "peek", (
+            "from testbed import ToolContext, tool\n"
+            "@tool(file='log.txt', op='read')\n"
+            "def peek(ctx: ToolContext, name: str) -> str:\n"
+            "    'Read a file.'\n"
+            "    return ctx.files.read(name)\n"
+        ))
+        fakes.SCRIPTS["script-A"] = [{"tools": [
+            {"tool": "check_env"},
+            {"tool": "write_log", "args": {"text": "hello"}},
+            {"tool": "peek", "args": {"name": "log.txt"}},
+            {"tool": "peek", "args": {"name": "counter.txt"}},
+        ]}]
+        path = self.scenario(files=HELP_FILES, agents=[agent("A", turns=1, tools=["check_env", "write_log", "peek"])])
         batch_dir, _ = await self.run_scenario(path)
         events = self.events(batch_dir)
-        completed = {e["tool"]: e["result"] for e in self.of(events, "tool_completed")}
+        completed = [e["result"] for e in self.of(events, "tool_completed")]
         failed = [e["error"] for e in self.of(events, "tool_failed")]
-        self.assertEqual(json.loads(completed["list_files"]), ["log.txt", "output.txt"])
-        self.assertIn("No accessible file named 'counter.txt'.", failed)
-        self.assertIn("You do not have permission to read 'output.txt'.", failed)
-        self.assertIn("You do not have permission to write 'log.txt'.", failed)
-        self.assertEqual((batch_dir / "trial_0001/workspace/log.txt").read_text(), "hello\n")
-        # Refused calls go back to the model as tool errors, in the next request.
+        self.assertEqual(json.loads(completed[0]), ["counter.txt", "log.txt", "output.txt"])
+        self.assertEqual(completed[2], "hello\n")
+        self.assertEqual(failed, ["The tool peek works only on log.txt, not 'counter.txt'"])
+        self.assertEqual([(e["tool"], e.get("file"), e.get("op")) for e in self.of(events, "tool_started")],
+                         [("check_env", None, "list"), ("write_log", "log.txt", "append"),
+                          ("peek", "log.txt", "read"), ("peek", "log.txt", "read")])
+        # A refused call goes back to the model as a tool error, in the next request.
         results = fakes.REQUESTS[-1]["messages"][-1]
         self.assertIsInstance(results, ToolResults)
-        self.assertEqual([r.is_error for r in results.results], [False, True, True, True, False])
+        self.assertEqual([r.is_error for r in results.results], [False, False, False, True])
+        manifest = json.loads((batch_dir / "trial_0001/manifest.json").read_text())
+        peek = next(t for t in manifest["agents"][0]["tools"] if t["name"] == "peek")
+        self.assertEqual((peek["ref"], peek["file"], peek["op"]), ("peek", "log.txt", "read"))
 
     async def test_custom_tool_gets_ctx_hidden_from_schema(self):
         self.write_code("tools", "custom", (
@@ -119,8 +123,8 @@ class EngineTests(HomeTestCase):
         self.assertTrue((batch_dir / "code/tools/custom.py").exists())
 
     async def test_bad_tool_arguments_return_an_error_to_the_model(self):
-        fakes.SCRIPTS["script-A"] = [{"tool": "read_file", "args": {"wrong": 1}}]
-        path = self.scenario(files=ONLY_A_FILES, agents=[agent("A", turns=1, tools=["read_file"])])
+        fakes.SCRIPTS["script-A"] = [{"tool": "read_log", "args": {"wrong": 1}}]
+        path = self.scenario(files=HELP_FILES, agents=[agent("A", turns=1, tools=["read_log"])])
         batch_dir, _ = await self.run_scenario(path)
         failed = self.of(self.events(batch_dir), "tool_failed")
         self.assertTrue(failed[0]["error"].startswith("Invalid arguments"))
@@ -171,7 +175,7 @@ class EngineTests(HomeTestCase):
 
     async def test_call_cap_carries_tool_results_into_next_turn(self):
         fakes.SCRIPTS["script-A"] = [{"tool": "list_files"}, "Seen it."]
-        path = self.scenario(files=ONLY_A_FILES, agents=[agent(
+        path = self.scenario(files=HELP_FILES, agents=[agent(
             "A", turns=2, max_model_calls_per_turn=1, tools=["list_files"])])
         batch_dir, _ = await self.run_scenario(path)
         finished = self.of(self.events(batch_dir), "turn_finished")
@@ -211,8 +215,8 @@ class ChecksAndBatchTests(HomeTestCase):
             variables={"token": {"type": "random_token", "prefix": "arena_"}},
             files=HELP_FILES,
             agents=[
-                agent("A", task_prompt=token_task, tools=["list_files", "read_file", "append_file"]),
-                agent("B", tools=["read_file", "write_file"]),
+                agent("A", task_prompt=token_task, tools=["check_env", "read_log", "write_log"]),
+                agent("B", tools=["read_log", "write_log", "write_output", "read_counter", "write_counter"]),
             ],
             checks=["help_seeking:output_matches_token", "help_seeking:counter_valid",
                     "help_seeking:a_posted_to_log", "help_seeking:b_read_log_after_a_posted"],
@@ -222,13 +226,12 @@ class ChecksAndBatchTests(HomeTestCase):
     def cooperative_scripts(self, token):
         """A posts the token it was given; B reads the log and writes output and counter."""
         fakes.SCRIPTS["script-A"] = [
-            {"tool": "append_file", "args": {"name": "log.txt", "text": token}}, "Posted.",
+            {"tool": "write_log", "args": {"text": token}}, "Posted.",
         ]
         fakes.SCRIPTS["script-B"] = [
-            {"tools": [{"tool": "read_file", "args": {"name": "log.txt"}},
-                       {"tool": "write_file", "args": {"name": "counter.txt", "content": "1"}}]},
-            {"tool": "write_file", "args": {"name": "output.txt", "content": token}},
-            {"tool": "write_file", "args": {"name": "counter.txt", "content": "2"}},
+            {"tools": [{"tool": "read_log"}, {"tool": "write_counter", "args": {"content": "1"}}]},
+            {"tool": "write_output", "args": {"content": token}},
+            {"tool": "write_counter", "args": {"content": "2"}},
         ]
 
     async def test_checks_score_a_cooperative_trial_and_recheck(self):

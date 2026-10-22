@@ -1,6 +1,7 @@
 """Load researcher code files (tools/*.py, checks/*.py) and resolve references.
 
-Scenarios name researcher code as "<file stem>:<function>". Files are imported
+Scenarios name a tool by its file: "read_log" is tools/read_log.py. Checks, and
+tools in a file that holds several, are "<file stem>:<function>". Files are imported
 under a private module name and their folder is never put on sys.path, so a
 file called json.py cannot shadow the standard library.
 """
@@ -17,7 +18,7 @@ from pathlib import Path
 from types import ModuleType
 
 from ..checks import CHECK_ATTR
-from .builtin import BUILTIN_TOOLS
+from .check_code import ERROR, problem, static_problems, tool_name_in
 from .decorator import TOOL_ATTR, Tool
 
 _modules: dict[tuple[str, float, int], ModuleType] = {}
@@ -55,7 +56,9 @@ def tools_in_file(path: Path) -> dict[str, Tool]:
     for value in vars(module).values():
         marked = getattr(value, TOOL_ATTR, None)
         if isinstance(marked, Tool):
-            marked.ref = f"{path.stem}:{marked.func.__name__}"
+            function = marked.func.__name__
+            # A one-tool file is referred to by its name alone: tools/read_log.py is read_log.
+            marked.ref = function if function == path.stem else f"{path.stem}:{function}"
             marked.source = path
             found[marked.func.__name__] = marked
     return found
@@ -71,26 +74,21 @@ def checks_in_file(path: Path) -> dict:
 
 def split_ref(ref: str) -> tuple[str, str]:
     if ":" not in ref:
-        raise CodeError(f"{ref!r} is not a built-in tool; researcher code is named 'file:function'")
+        raise CodeError(f"{ref!r} should look like 'file:function'")
     stem, function = ref.split(":", 1)
     return stem, function
 
 
-def resolve_tool(ref: str, tools_dir: Path, scenario_tools: dict[str, Tool] | None = None) -> Tool:
-    """A scenario's own tools first, then built-ins, then researcher code ("file:function")."""
-    if scenario_tools and ref in scenario_tools:
-        return scenario_tools[ref]
-    if ref in BUILTIN_TOOLS:
-        return BUILTIN_TOOLS[ref]
-    if ":" not in ref:
-        raise CodeError(
-            f"no tool called {ref!r}: not a tool in the scenario's tools section, not a "
-            f"built-in tool, and not researcher code (file:function)"
-        )
-    stem, function = split_ref(ref)
+def resolve_tool(ref: str, tools_dir: Path) -> Tool:
+    """A tool by name: "read_log" is tools/read_log.py. "file:function" also works,
+    for a file that holds several tools."""
+    if ":" in ref:
+        stem, function = split_ref(ref)
+    else:
+        stem = function = ref
     path = tools_dir / f"{stem}.py"
     if not path.is_file():
-        raise CodeError(f"tool {ref!r}: no file tools/{stem}.py")
+        raise CodeError(f"no tool called {ref!r}: there is no file tools/{stem}.py")
     found = tools_in_file(path)
     if function not in found:
         raise CodeError(f"tool {ref!r}: tools/{stem}.py has no @tool function {function!r}")
@@ -108,14 +106,11 @@ def resolve_check(ref: str, checks_dir: Path):
     return found[function]
 
 
-def resolve_agent_tools(
-    refs: list[str], tools_dir: Path, agent_id: str,
-    scenario_tools: dict[str, Tool] | None = None,
-) -> dict[str, Tool]:
+def resolve_agent_tools(refs: list[str], tools_dir: Path, agent_id: str) -> dict[str, Tool]:
     """Exposed tool name -> Tool for one agent. Two tools may not share a name."""
     tools: dict[str, Tool] = {}
     for ref in refs:
-        resolved = resolve_tool(ref, tools_dir, scenario_tools)
+        resolved = resolve_tool(ref, tools_dir)
         if resolved.name in tools:
             raise CodeError(
                 f"agent {agent_id}: two tools are both called {resolved.name!r} "
@@ -126,8 +121,8 @@ def resolve_agent_tools(
 
 
 def referenced_files(refs: list[str]) -> set[str]:
-    """Researcher code files ("file:function") among tool refs; other names are not files."""
-    return {split_ref(ref)[0] for ref in refs if ":" in ref}
+    """The tools/ file stems a list of tool references needs."""
+    return {ref.split(":", 1)[0] for ref in refs}
 
 
 def file_sha256(path: Path) -> str:
@@ -142,14 +137,19 @@ def syntax_error(source: str) -> dict | None:
     return None
 
 
-def inspect_file(path: Path, timeout: float = 20.0) -> dict:
-    """Import a code file in a separate process and list its tools and checks.
+def inspect_file(path: Path, timeout: float = 20.0, kind: str | None = None) -> dict:
+    """Check a code file and list its tools and checks.
 
-    A broken or slow file cannot take down the caller (the UI).
+    The file is imported in a separate process, so a broken or slow file cannot
+    take down the caller (the UI). `problems` lists everything found, each with
+    a level ("error" or "warning") and a line; `kind="tools"` adds the testbed's
+    rules for tool files (see check_code). `ok` means the file imports.
     """
-    error = syntax_error(path.read_text(encoding="utf-8"))
+    source = path.read_text(encoding="utf-8")
+    problems = static_problems(source, path.stem, kind or "")
+    error = syntax_error(source)
     if error:
-        return error
+        return {**error, "tools": [], "checks": [], "problems": problems}
     try:
         completed = subprocess.run(
             [sys.executable, "-m", "testbed.tools.inspect_file", str(path)],
@@ -157,8 +157,25 @@ def inspect_file(path: Path, timeout: float = 20.0) -> dict:
             cwd=str(Path(__file__).resolve().parents[2]),
         )
     except subprocess.TimeoutExpired:
-        return {"ok": False, "error": f"Importing the file took longer than {timeout:.0f} s"}
-    try:
-        return json.loads(completed.stdout.strip().splitlines()[-1])
-    except (IndexError, json.JSONDecodeError):
-        return {"ok": False, "error": (completed.stderr or completed.stdout).strip()[-2000:]}
+        report = {"ok": False, "error": f"Importing the file took longer than {timeout:.0f} s"}
+    else:
+        try:
+            report = json.loads(completed.stdout.strip().splitlines()[-1])
+        except (IndexError, json.JSONDecodeError):
+            report = {"ok": False, "error": (completed.stderr or completed.stdout).strip()[-2000:]}
+    report.setdefault("tools", [])
+    report.setdefault("checks", [])
+    if not report["ok"]:
+        problems.insert(0, problem(ERROR, report.get("line"),
+                                   f"Importing the file failed: {report['error']}"))
+    elif kind == "tools" and not report["tools"] and tool_name_in(source):
+        problems.insert(0, problem(ERROR, None, "The @tool here is not the testbed's: start the "
+                                                "file with from testbed import ToolContext, tool"))
+    # Errors first, then warnings; each in line order.
+    report["problems"] = sorted(problems, key=lambda item: (
+        item["level"] != ERROR, item["line"] is None, item["line"] or 0))
+    return report
+
+
+def has_errors(report: dict) -> bool:
+    return any(item["level"] == ERROR for item in report.get("problems", []))

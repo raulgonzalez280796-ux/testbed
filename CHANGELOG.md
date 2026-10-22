@@ -2,13 +2,36 @@
 
 ## Unreleased
 
-**Single-purpose tools.**
-- A scenario's new `tools:` section declares named tools that each do one action on one file, for example `read_log`, `write_log` or `write_counter`. The kinds are `read_file`, `write_file`, `append_file` and `list_files` (optionally limited to some files).
-- These tools take no file name, so a tool can never reach another file, and giving it to an agent is the permission. Names and descriptions are yours.
-- In the UI: a **Tools** tab in the scenario editor, and "+ read / write / append tool" buttons under each file. The agents' tool picker lists scenario tools first.
-- An agent's tools may mix single-purpose tools, the generic built-ins and researcher code.
-- Tool events and `TrialRecord.tool_calls()` now carry `file` and `op` (read, write, append, list), so checks can ask what happened to a file, whatever the tool is called.
-- The `help_seeking` template now uses these tools: A has `check_env`, `read_log` and `write_log`; B also has `read_output`, `write_output`, `read_counter` and `write_counter`. Its checks use `file`/`op`.
+**One tools library.** Every tool is now a Python file in `tools/`, and one page manages them all.
+- A tool is one file holding one `@tool` function with the same name: `tools/read_log.py` is the tool `read_log`, and agents list tools by that name. `file:function` still works for older files that hold several tools.
+- New `@tool(file="log.txt", op="append")`:
+  - the tool can touch only that file, because `ctx.files` refuses any other name;
+  - every call is logged with its `file` and `op` (read, write, append, list), so a check can ask what happened to a file whatever the tool is called (`TrialRecord.tool_calls(file=..., op=...)`).
+- **Predefined tools**, one file each, which `init` copies into a project. They are ordinary tools you can edit, copy or delete.
+  - File tools: `check_env`, `list_files`, `read_log`, `write_log`, `append_log`, `read_output`, `write_output`, `read_counter`, `write_counter`. They send the model v1's exact descriptions and schemas.
+  - Scenario tools: `make_offer` and `accept_offer` (negotiation), `submit_secret` (secret_keeper).
+  - The four templates use them by name. In `help_seeking`, A has `check_env`, `read_log` and `write_log`; B also has `read_output`, `write_output`, `read_counter` and `write_counter`.
+- **A new Tools page:**
+  - a list of every tool, with its check status, your note, what the model is told, the file it works on, and which scenarios use it;
+  - **Add tool**, from a starter (read, write or append to a file, list the files, blank), pasted code or an uploaded `.py` file;
+  - an editor with **Check** and **Save**;
+  - **Your note**, kept in `tools/notes.yaml` and never sent to any model;
+  - **Duplicate**, which renames the function too, and **Delete**, which first says which scenarios use the tool.
+- **A code check** for tools. Each problem has a line number, and only errors block saving.
+  - Errors: syntax and import errors, and the tool rules: one `@tool` per file, named like the file, type hints on every argument, a valid `file=` and `op=`.
+  - Warnings: pyflakes findings (undefined names, unused imports), and a missing docstring or return type.
+  - New dependency: `pyflakes`.
+- Checks have their own **Checks** page (unchanged otherwise).
+- The scenario editor no longer has a Tools tab or an access grid. The Agents tab picks from every tool in `tools/`, labeled with your notes, and the Preview shows which file each tool works on.
+- Errors from `ctx.files` (for example "No file named 'x.txt'") reach the model as their plain message, like `ToolError`. Before, a researcher tool's file error was sent as `WorkspaceError: …`.
+
+**Removed:**
+- the generic file tools `read_file`, `write_file` and `append_file`, and the built-in `list_files` (now a predefined tool that lists every file, as in v1);
+- the per-file access grid (`files[].access`) and `ctx.file_access`;
+- the scenario `tools:` section (single-purpose tools declared in YAML), which was added after 0.1.0 and never released;
+- the multi-tool template files `tools/v1_tools.py`, `negotiation.py` and `secret_keeper.py`, split into one file per tool.
+
+A scenario that still uses `access` or `tools:` gets a validation message saying what to do. The UI editor removes them when it opens the file and explains the change. To get the predefined tools in an existing project, run `python -m testbed init <project>`: it only adds missing files.
 
 ## 0.1.0 (2026-10-22): first version
 

@@ -19,10 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 NAME_PATTERN = r"^[A-Za-z][A-Za-z0-9_-]{0,63}$"
 FILE_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 TEMPLATE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
-ALL_AGENTS = "*"
 
-# "list" alone makes a file visible in list_files without reading or writing it.
-FileOp = Literal["list", "read", "write", "append"]
 
 
 class Spec(BaseModel):
@@ -37,12 +34,16 @@ class FileSpec(Spec):
         description="File name, without folders: letters, digits, '.', '_' and '-'.")
     content: str = Field(
         "", description="Initial content. {{variable}} is replaced with the trial's value.")
-    access: dict[str, list[FileOp]] = Field(
-        {}, description=(
-            "What each agent's built-in file tools may do with this file: agent id (or '*' "
-            "for every agent) -> a list of list, read, write, append. 'list' alone shows the "
-            "name in list_files without allowing reads or writes. Researcher tools reach "
-            "every file through ctx.files regardless."))
+
+    @model_validator(mode="before")
+    @classmethod
+    def removed_access(cls, data):
+        if isinstance(data, dict) and "access" in data:
+            raise ValueError(
+                f"file {data.get('name')!r}: 'access' was removed. Tools now decide which files "
+                "they touch: give agents tools such as read_log or write_log (see the Tools page), "
+                "then delete the access lines from this file.")
+        return data
 
 
 class VariableSpec(Spec):
@@ -99,8 +100,9 @@ class AgentSpec(Spec):
         description=("A turn ends when the model answers without a tool call, or after this "
                      "many calls. Tool results from the last call are seen next turn."))
     tools: list[str] = Field(
-        [], description=("Built-in tool names (list_files, read_file, write_file, append_file), "
-                         "or file:function for researcher tools in tools/."))
+        [], description=("The tools this agent may call, by name: read_log is the file "
+                         "tools/read_log.py (see the Tools page). file:function also works "
+                         "for a file that holds several tools."))
     request_timeout_seconds: float = Field(
         60.0, gt=0, description="Timeout for one model request.")
     max_retries: int = Field(
@@ -150,33 +152,6 @@ class LimitsSpec(Spec):
         description="Longest wait between retries when the provider gives no retry-after.")
 
 
-ToolKind = Literal["read_file", "write_file", "append_file", "list_files"]
-FILE_KINDS = ("read_file", "write_file", "append_file")
-
-
-class ToolDef(Spec):
-    """A single-purpose tool for this scenario: one action on one file, under your own name.
-    It takes no file name, so it can never reach another file; giving it to an agent is
-    the permission."""
-
-    name: str = Field(
-        pattern=r"^[A-Za-z][A-Za-z0-9_]{0,63}$",
-        description=("The name the model sees, e.g. read_log: a letter, then letters, digits "
-                     "or '_'. Agents list it in their tools."))
-    kind: ToolKind = Field(
-        description=("read_file returns the file; write_file replaces it (argument: content); "
-                     "append_file adds text and a newline (argument: text); list_files lists "
-                     "file names."))
-    file: str | None = Field(
-        None, description="read_file, write_file, append_file: the one file this tool works on.")
-    files: list[str] | None = Field(
-        None, description=("list_files: the file names it may show. Empty means every file "
-                           "in the workspace."))
-    description: str = Field(
-        "", description=("What the model is told the tool does. Empty means a standard "
-                         "description, e.g. 'Read the UTF-8 contents of log.txt.'"))
-
-
 class Scenario(Spec):
     """A complete experiment setup: one YAML file in scenarios/."""
 
@@ -203,15 +178,21 @@ class Scenario(Spec):
     variables: dict[str, VariableSpec] = Field(
         {}, description="Per-trial values, inserted with {{name}} in prompts and file contents.")
     files: list[FileSpec] = Field([], description="The workspace files every trial starts with.")
-    tools: list[ToolDef] = Field(
-        [], description=("Single-purpose tools for this scenario (one action on one file), "
-                         "named by you. Agents list them by name next to built-in and "
-                         "researcher tools."))
     agents: list[AgentSpec] = Field(min_length=1, description="At least one agent.")
     checks: list[str] = Field(
         [], description="file:function for researcher checks in checks/, run after every trial.")
     budget: BudgetSpec = Field(BudgetSpec(), description="Token caps.")
     limits: LimitsSpec = Field(LimitsSpec(), description="Tool and retry limits.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def removed_tools_section(cls, data):
+        if isinstance(data, dict) and "tools" in data:
+            raise ValueError(
+                "the scenario's 'tools:' section was removed: every tool is now a Python file "
+                "in tools/ (see the Tools page). Give agents tools by name, e.g. "
+                "tools: [read_log, write_log], then delete the top-level tools: section.")
+        return data
 
     @field_validator("variables")
     @classmethod
@@ -238,28 +219,6 @@ class Scenario(Spec):
         names = [spec.name for spec in self.files]
         if len(set(names)) != len(names):
             raise ValueError(f"file names must be unique: {names}")
-        for spec in self.files:
-            unknown = set(spec.access) - set(ids) - {ALL_AGENTS}
-            if unknown:
-                raise ValueError(f"file {spec.name!r}: access names unknown agents {sorted(unknown)}")
-        tool_names = [tool.name for tool in self.tools]
-        repeated = sorted({name for name in tool_names if tool_names.count(name) > 1})
-        if repeated:
-            raise ValueError(f"tool names must be unique: {repeated}")
-        for tool in self.tools:
-            if tool.kind in FILE_KINDS:
-                if not tool.file:
-                    raise ValueError(f"tool {tool.name!r} ({tool.kind}) needs a file")
-                if tool.file not in names:
-                    raise ValueError(f"tool {tool.name!r}: {tool.file!r} is not one of the scenario's files")
-                if tool.files is not None:
-                    raise ValueError(f"tool {tool.name!r}: 'files' is only for list_files; use 'file'")
-            else:
-                if tool.file is not None:
-                    raise ValueError(f"tool {tool.name!r}: list_files takes 'files' (a list), not 'file'")
-                unknown = sorted(set(tool.files or []) - set(names))
-                if unknown:
-                    raise ValueError(f"tool {tool.name!r}: {unknown} are not the scenario's files")
         for text, where in self.template_fields():
             for name in TEMPLATE.findall(text):
                 if name not in self.variables:
@@ -310,15 +269,6 @@ class Scenario(Spec):
     @property
     def providers(self) -> set[str]:
         return {agent.provider for agent in self.agents}
-
-    def file_access(self, agent_id: str) -> dict[str, set[str]]:
-        """File name -> operations this agent's built-in file tools may do."""
-        access = {}
-        for spec in self.files:
-            ops = set(spec.access.get(agent_id, [])) | set(spec.access.get(ALL_AGENTS, []))
-            if ops:
-                access[spec.name] = ops
-        return access
 
 
 def load_scenario(path: str | Path) -> Scenario:

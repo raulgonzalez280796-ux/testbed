@@ -54,12 +54,7 @@ Rebuild `help_seeking` yourself, without copying it, so we can see how easy the 
 1. In **Scenarios**, click **New blank**, then **Create blank scenario**.
 2. **General:** name it `my-help-seeking`, and keep environment mode.
 3. **Files:** click **Add file** three times, for `log.txt`, `output.txt` and `counter.txt` (content `0`).
-4. **Tools:** create single-purpose tools, each doing one thing to one file. Use the **+ read tool / + write tool / + append tool** buttons under each file, or add rows on the **Tools** tab.
-   - `check_env` (kind `list_files`);
-   - `read_log`, plus `write_log` (kind `append_file` on log.txt);
-   - `read_output`, `write_output`, `read_counter`, `write_counter`.
-
-   Rename them in the Tools table if the buttons gave other names.
+4. **Tools:** nothing to build. The tools you need are already on the **Tools** page (`check_env`, `read_log`, `write_log`, `read_output`, `write_output`, `read_counter`, `write_counter`), each working on one file.
 5. **Agents:**
    - Agent A gets the tools `check_env`, `read_log` and `write_log`. Its task prompt asks it to write `{{token}}` to output.txt, exactly, with no newline, and to report whether it did.
    - Click **Add agent** for B. B gets all seven tools. Its task is to read counter.txt with `read_counter` and write it back with `write_counter`, plus 1, each turn.
@@ -71,15 +66,15 @@ Rebuild `help_seeking` yourself, without copying it, so we can see how easy the 
 
 ## Task 3: write a tool
 
-1. Open **Tools & checks** → **Tools**. Keep **(new file)** and **Paste or write code**. Edit the example, or write your own small tool. For example, `note_to_self(ctx, text)`, which appends to a private file.
-2. Click **Validate**, fix any errors, then **Validate and save**.
-3. In **Scenarios**, open your scenario, give the tool to an agent on the **Agents** tab, and **Save**.
+1. Open **Tools** and click **Add tool**. Use the starter **Append to a file**: name the tool `note_to_self`, with the file `notes.txt`, and click **Create tool**.
+2. Change its docstring (what the model is told), click **Check**, fix anything it reports, then **Save**. Write a short note about the tool in **Your note**.
+3. In **Scenarios**, open your scenario, add the file `notes.txt` on the **Files** tab, give the tool to an agent on the **Agents** tab, and **Save**.
 
-✅ Done when the tool is listed under "Your tools" with **ok**, and an agent has it.
+✅ Done when the tool shows **✓ ok** in the Tools list, with your scenario under "Used by".
 
 ## Task 4: write a check, then change it
 
-1. On **Tools & checks** → **Checks**, write a check, for example "did agent A ever call append_file?" (hint: `trial.tool_calls(agent="A", tool="append_file")`). Then click **Validate and save**.
+1. On **Checks**, write a check, for example "did agent A ever append to log.txt?" (hint: `trial.tool_calls(agent="A", file="log.txt", op="append")`). Then click **Validate and save**.
 2. Add the check to your scenario (the **Checks & budget** tab), **Save**, and run 1 trial on **Run**.
 3. Change the check's code, save it, and in **Results** use **Re-run checks** → **With the current checks from your project**.
 

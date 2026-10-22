@@ -14,18 +14,21 @@ def main(path: str) -> int:
         tools = tools_in_file(file)
         checks = checks_in_file(file)
     except Exception as error:
-        line = None
-        for frame in traceback.extract_tb(error.__traceback__ or sys.exc_info()[2]):
+        cause = error.__cause__ or error
+        line = None  # the last line of the researcher's file in the traceback
+        for frame in traceback.extract_tb(cause.__traceback__):
             if Path(frame.filename).resolve() == file.resolve():
                 line = frame.lineno
-        cause = error.__cause__ or error
+        if line is None and isinstance(cause, SyntaxError):
+            line = cause.lineno
         print(json.dumps({"ok": False, "error": f"{type(cause).__name__}: {cause}", "line": line}))
         return 1
     print(json.dumps({
         "ok": True,
         "tools": [
             {"ref": item.ref, "name": item.name, "description": item.description,
-             "parameters": item.parameters, "takes_ctx": item.takes_ctx}
+             "parameters": item.parameters, "takes_ctx": item.takes_ctx,
+             "file": item.target_file, "op": item.op}
             for item in tools.values()
         ],
         "checks": [

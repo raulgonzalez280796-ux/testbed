@@ -6,9 +6,9 @@ The four templates (`python -m testbed init` copies them into a project) are wor
 
 | Template | Shows |
 |---|---|
-| `help_seeking` | environment mode, single-purpose tools (each tool = one action on one file), no code |
-| `help_seeking_v1` | researcher tools that reproduce another tool set exactly (`tools/v1_tools.py`) |
-| `secret_keeper` | conversation mode, a researcher tool that ends the trial, a hidden sender (`conversation_format: "{text}"`) |
+| `help_seeking` | environment mode, predefined tools that each work on one file (`check_env`, `read_log`, `write_log`, …) |
+| `help_seeking_v1` | the same kind of tools under v1's exact names, descriptions and schemas, with v1's prompts |
+| `secret_keeper` | conversation mode, a tool that ends the trial (`submit_secret`), a hidden sender (`conversation_format: "{text}"`) |
 | `negotiation` | conversation mode, private per-trial values, shared tool state (`ctx.state`) |
 
 ## How a trial runs
@@ -46,60 +46,80 @@ The four templates (`python -m testbed init` copies them into a project) are wor
 
 The testbed adds no instructions of its own, so **tell each agent in its prompt that what it writes is sent to the others** (for example: "everything you write is sent to the buyer, and their messages will appear here"). Without that, an agent that speaks first may conclude it has no way to communicate, as an early live run of `secret_keeper` showed.
 
-## Tools: three kinds
+## Tools
 
-An agent's `tools` list can mix three kinds of tool. The model sees a name, a description and the arguments of each; nothing else.
-
-| Kind | Example | Use it when |
-|---|---|---|
-| **Single-purpose tools** (`tools:` in the scenario) | `read_log`, `write_log` | Each tool should do one thing to one file, as in v1. No code. |
-| **Generic file tools** (built in) | `read_file(name)`, `write_file(name, content)` | One general tool should work on several files, with permissions per agent in the access grid |
-| **Researcher tools** (your Python code) | `negotiation:make_offer` | The tool needs logic: rules, scores, shared state, ending the trial |
-
-### Single-purpose tools
-
-Declare them once in the scenario's `tools:` section (the UI's **Tools** tab, or the "+ read tool / + write tool / + append tool" buttons under each file on the **Files** tab), then give them to agents by name:
+Every tool is a Python file in your project's `tools/` folder, holding one function marked `@tool` that has the same name as the file: `tools/read_log.py` is the tool `read_log`. An agent's `tools` list names the tools it may call:
 
 ```yaml
-tools:
-  - {name: check_env,    kind: list_files}                  # every file name in the workspace
-  - {name: read_log,     kind: read_file,   file: log.txt}
-  - {name: write_log,    kind: append_file, file: log.txt}   # adds a line; history is kept
-  - {name: write_output, kind: write_file,  file: output.txt}
 agents:
   - id: A
     tools: [check_env, read_log, write_log]
 ```
 
-| Kind | Arguments the model fills in | Does |
-|---|---|---|
-| `read_file` | none | Returns the file's content |
-| `write_file` | `content` | Replaces the file's content |
-| `append_file` | `text` | Adds the text and a newline at the end |
-| `list_files` | none | Lists file names. `files: [...]` limits what it shows; without it, every file in the workspace is listed. |
+The model sees each tool's name, description and arguments, nothing else. **Giving a tool to an agent is the permission**; there is no separate access table.
 
-None of them takes a file name: the file is fixed when you declare the tool, so a tool can never reach another file. **Giving the tool to an agent is the permission**; the access grid plays no part. `description` is optional. The default follows v1's wording, e.g. "Read the UTF-8 contents of log.txt.". Because the name and the description are part of what the agent experiences, both are yours to choose, and both are recorded in each trial's manifest.
+### The Tools page
 
-A scenario tool with the same name as a built-in (for example `list_files`) replaces the built-in for that scenario.
+- **The list** shows every tool in `tools/`:
+  - its check status: ✓ ok, ⚠ warnings, ✗ errors;
+  - your note;
+  - what the model is told (the docstring's first line);
+  - the file it works on;
+  - which scenarios use it, and for which agents.
+- **Add tool** starts from one of three things. Whichever you use, the tool's name becomes its file name.
+  - a **starter**: read a file, write a file, append to a file, list the files, or blank;
+  - **pasted code**;
+  - an **uploaded `.py` file**.
+- **Opening a tool** shows its code in an editor, with these actions:
+  - **Check** runs the [code check](#the-code-check) without saving.
+  - **Save** checks first. Errors stop the save; warnings don't.
+  - **Your note** is stored in `tools/notes.yaml` and never sent to any model.
+  - **Duplicate** copies the tool under a new name and renames the function.
+  - **Delete** first says which scenarios use the tool.
 
-### Generic file tools and the access grid
+In the scenario editor, the Agents tab picks from the same list, labeled with your notes.
 
-`list_files`, `read_file(name)`, `write_file(name, content)` and `append_file(name, text)` take a file name. What each agent may do is set per file in the **access table**: agent id (or `*` for everyone) → operations.
+### Predefined tools
 
-| Operation | Lets the agent |
-|---|---|
-| `list` | see the file's name in `list_files` (nothing else) |
-| `read` | `read_file` |
-| `write` | `write_file` (replace the content) |
-| `append` | `append_file` (adds the text and a newline) |
+`python -m testbed init <project>` copies these into `tools/`. They are ordinary tools: open, edit, copy or delete them like your own.
 
-Any operation also makes the file show up in the generic `list_files`. A refused call returns an error to the model, such as "You do not have permission to write 'log.txt'.", and the error is logged. A name the agent has no access to at all gets "No accessible file named …", whether or not the file exists.
+| Tool | Does | The model fills in | Used in |
+|---|---|---|---|
+| `check_env` | Lists every file in the workspace | nothing | help_seeking |
+| `list_files` | The same, under v1's name | nothing | help_seeking_v1 |
+| `read_log` | Returns log.txt | nothing | both help-seeking templates |
+| `write_log` | Adds the text and a newline to log.txt | `text` | help_seeking |
+| `append_log` | The same, under v1's name | `text` | help_seeking_v1 |
+| `read_output`, `write_output` | Return or replace output.txt | `content`, to write | both help-seeking templates |
+| `read_counter`, `write_counter` | Return or replace counter.txt | `content`, to write | both help-seeking templates |
+| `make_offer`, `accept_offer` | Record an offer in shared state; accept the other side's offer, write deal.txt and end the trial | `price`, to offer | negotiation |
+| `submit_secret` | Checks a guess; a correct guess ends the trial | `guess` | secret_keeper |
 
-Files may only be named, never given a path. `limits.max_file_bytes` and `limits.max_tool_input_bytes` cap sizes. Researcher tools can reach every file through `ctx.files`, regardless of the table; your tool decides.
+The file tools send the model exactly the descriptions and JSON schemas v1 sent, and `help_seeking_v1` also uses v1's names, so it reproduces v1's stimulus.
 
-## Writing a researcher tool
+### Writing a tool
 
-A researcher tool is a Python function in `tools/<file>.py`, marked with `@tool`. Scenarios refer to it as `file:function`, e.g. `negotiation:make_offer`. Add tools on the UI's Tools & checks page (paste or upload), or put the file in `tools/` yourself.
+```python
+from testbed import ToolContext, tool
+
+
+@tool(file="log.txt", op="append")
+def write_log(ctx: ToolContext, text: str) -> str:
+    """Append text followed by a newline to log.txt."""
+    ctx.files.append("log.txt", text + "\n")
+    return "Text appended."
+```
+
+What the model sees:
+- **Name:** the function name, which is also the file name.
+- **Description:** the docstring (or `@tool(description=...)`).
+- **Arguments:** a JSON schema built from the type hints. `Annotated[type, "text"]` adds a description to an argument; defaults make an argument optional.
+- **Schema override:** `@tool(schema={...})` replaces the generated schema exactly, while arguments are still checked against the type hints. The predefined file tools use it to send v1's schemas.
+
+**One file per tool: `file=` and `op=`.** Both are optional.
+- **`file="log.txt"`** limits the tool to that file. Inside the tool, `ctx.files` works only on log.txt. Any other name raises an error that goes back to the model, for example "The tool write_log works only on log.txt, not 'x.txt'". `ctx.files.list()` shows only log.txt. So "this tool touches only log.txt" is enforced, not just promised.
+- **`op=`** (read, write, append or list) is recorded with every call, together with the file. Checks can then ask "did A append to log.txt?" whatever the tool is called (see `trial.tool_calls` below).
+- A tool without `file=` reaches every workspace file through `ctx.files`, so your code decides. `make_offer` keeps its state in `ctx.state` instead:
 
 ```python
 from typing import Annotated
@@ -117,19 +137,12 @@ def make_offer(ctx: ToolContext, price: Annotated[int, "Your offer, in whole dol
     return f"Your offer of ${price} is recorded."
 ```
 
-What the model sees:
-- **Name:** the function name (or `@tool(name=...)`).
-- **Description:** the docstring (or `@tool(description=...)`).
-- **Arguments:** a JSON schema built from the type hints. `Annotated[type, "text"]` adds a description to an argument; defaults make an argument optional.
-- **Schema override:** `@tool(schema={...})` replaces the generated schema exactly, while arguments are still checked against the type hints. `tools/v1_tools.py` uses it to reproduce v1's schemas.
-
 The first parameter, if it is `ctx` or typed `ToolContext`, is filled in by the testbed and never shown to the model:
 
 | `ctx.` | What it is |
 |---|---|
 | `agent_id` | The agent calling the tool |
-| `files` | Every workspace file: `list()`, `exists(name)`, `read(name)`, `write(name, text)`, `append(name, text)` (no newline added) |
-| `file_access` | The calling agent's access table (file → operations) |
+| `files` | The workspace files: `list()`, `exists(name)`, `read(name)`, `write(name, text)`, `append(name, text)` (no newline added). Only the declared file if the tool has `file=`. |
 | `state` | A dict shared by every tool call of every agent in this trial |
 | `variables` | The trial's variable values |
 | `rng` | A random generator seeded for this trial |
@@ -141,14 +154,26 @@ The first parameter, if it is `ctx` or typed `ToolContext`, is filled in by the 
 Behavior:
 - **Return value.** Return a string, or anything JSON can encode (it is sent as JSON).
 - **Invalid arguments.** Arguments that don't match the type hints are refused with "Invalid arguments: …"; your function doesn't run.
-- **Errors.** `raise ToolError("message")` sends exactly that message back as an error. Any other exception is sent as `ErrorType: message`. Either way the trial continues; the error is part of the agent's experience, and it is logged as `tool_failed`.
+- **Errors.** Two kinds of error go back to the model as exactly their message: `raise ToolError("message")`, and file errors from `ctx.files` (for example "No file named 'x.txt'"). Any other exception is sent as `ErrorType: message`. Either way the trial continues; the error is part of the agent's experience, and it is logged as `tool_failed`.
 - **Sync or async.** Both work. Sync functions run in a thread, so a slow tool doesn't hold up other trials. Both kinds are stopped after `limits.tool_timeout_seconds`.
 - **Truncated replies.** If the model's reply was cut off by its output limit, its tool calls are not run (`tool_skipped`), and the model is told so.
+- **Files.** Files may only be named, never given a path. `limits.max_file_bytes` and `limits.max_tool_input_bytes` cap sizes.
 - **Frozen code.** Code runs on your machine with your permissions. When a batch starts, the tool files it uses are copied into the batch folder, so results always match the code that produced them.
+
+### The code check
+
+The Tools page checks code without running it, then imports it in a separate process, so a broken file can't crash the UI. Each problem comes with its line.
+
+| | Errors (block Save) | Warnings |
+|---|---|---|
+| **Python** | syntax errors; errors while importing the file | from [pyflakes](https://pypi.org/project/pyflakes/): undefined names, unused imports and variables, redefinitions |
+| **Tool rules** | not exactly one `@tool` in the file; a function name that differs from the file name; an argument without a type hint; `*args`/`**kwargs`; a `file=` that isn't a plain file name; an `op=` that isn't read, write, append or list | no docstring (the model gets no description); no return type |
+
+**Files with several tools.** A file with several `@tool` functions, as older versions made, still runs: agents refer to its tools as `file:function`, for example `pair:ping`. The Tools page marks such a file ✗, because it edits one tool per file. To edit those tools there, copy each into its own tool.
 
 ## Writing a check
 
-A check scores a finished trial. It is a function in `checks/<file>.py`, marked with `@check`. Scenarios list it as `file:function` in `checks`.
+A check scores a finished trial. It is a function in `checks/<file>.py`, marked with `@check`. Scenarios list it as `file:function` in `checks`. Add checks on the UI's Checks page, or put the file in `checks/` yourself.
 
 ```python
 from testbed import TrialRecord, check
@@ -166,7 +191,7 @@ def output_matches_token(trial: TrialRecord) -> bool:
 |---|---|
 | `trial.files` | final workspace contents, name → text |
 | `trial.variables` | the trial's variable values |
-| `trial.tool_calls(agent=None, tool=None, file=None, op=None)` | tool calls in order: `{agent, tool, arguments, file, op, round, seq, ok, result}`. `file` and `op` (read, write, append, list) are filled in for single-purpose and generic file tools, so "did A append to log.txt?" is `trial.tool_calls(agent="A", file="log.txt", op="append")`, whatever the tool is called. |
+| `trial.tool_calls(agent=None, tool=None, file=None, op=None)` | tool calls in order: `{agent, tool, arguments, file, op, round, seq, ok, result}`. `file` and `op` (read, write, append, list) are filled in for tools that declare them with `@tool(file=..., op=...)`, as all predefined tools do, so "did A append to log.txt?" is `trial.tool_calls(agent="A", file="log.txt", op="append")`, whatever the tool is called. |
 | `trial.messages(agent=None)` | each agent's message per turn: `{agent, round, text}` |
 | `trial.events` / `trial.events_of(type)` | the raw event log (see [results](results.md)) |
 | `trial.manifest` | everything the agents were given |

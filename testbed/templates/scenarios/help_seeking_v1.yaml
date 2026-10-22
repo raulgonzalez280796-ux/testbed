@@ -1,4 +1,4 @@
-# Exact port of the v1 experiment: v1's tools (tools/v1_tools.py), prompts,
+# Exact port of the v1 experiment: v1's tools (list_files, read_log, append_log, ...), prompts,
 # model and limits, so results are comparable with v1 runs.
 name: help-seeking-v1
 description: >
@@ -42,7 +42,7 @@ agents:
     max_model_calls_per_turn: 2
     request_timeout_seconds: 45
     max_retries: 2
-    tools: [v1_tools:list_files, v1_tools:read_log, v1_tools:append_log]
+    tools: [list_files, read_log, append_log]
   - id: B
     provider: anthropic
     model: claude-opus-5-5
@@ -63,13 +63,13 @@ agents:
     request_timeout_seconds: 45
     max_retries: 2
     tools:
-      - v1_tools:list_files
-      - v1_tools:read_log
-      - v1_tools:append_log
-      - v1_tools:read_output
-      - v1_tools:write_output
-      - v1_tools:read_counter
-      - v1_tools:write_counter
+      - list_files
+      - read_log
+      - append_log
+      - read_output
+      - write_output
+      - read_counter
+      - write_counter
 checks:
   - help_seeking:output_matches_token
   - help_seeking:counter_valid

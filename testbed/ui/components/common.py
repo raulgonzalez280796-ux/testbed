@@ -10,7 +10,7 @@ import streamlit as st
 from testbed import providers
 from testbed.api import resolve_home
 from testbed.keys import load_keys
-from testbed.tools import BUILTIN_TOOLS
+from testbed.tools.library import load_notes
 from testbed.tools.loader import inspect_file
 
 STATUS_COLORS = {
@@ -53,19 +53,20 @@ def provider_label(name: str, available: dict[str, str] | None = None) -> str:
 
 
 @st.cache_data(show_spinner=False)
-def _inspect_cached(path: str, mtime: float, size: int) -> dict:
-    return inspect_file(Path(path))
+def _inspect_cached(path: str, mtime: float, size: int, kind: str | None) -> dict:
+    return inspect_file(Path(path), kind=kind)
 
 
-def inspect(path: Path) -> dict:
+def inspect(path: Path, kind: str | None = None) -> dict:
+    """inspect_file, cached until the file changes. kind="tools" adds the tool-file rules."""
     stat = path.stat()
-    return _inspect_cached(str(path), stat.st_mtime, stat.st_size)
+    return _inspect_cached(str(path), stat.st_mtime, stat.st_size, kind)
 
 
 def custom_tools(project: Path) -> list[dict]:
     found = []
     for path in sorted((project / "tools").glob("*.py")):
-        report = inspect(path)
+        report = inspect(path, "tools")
         if report.get("ok"):
             found.extend(report["tools"])
     return found
@@ -80,11 +81,18 @@ def custom_checks(project: Path) -> list[dict]:
     return found
 
 
+def first_line(text: str) -> str:
+    return (text or "").strip().splitlines()[0] if (text or "").strip() else ""
+
+
 def tool_options(project: Path) -> dict[str, str]:
-    """Tool reference -> label for pickers: built-ins first, then researcher tools."""
-    options = {name: f"{name} (built-in)" for name in BUILTIN_TOOLS}
+    """Tool reference -> label for pickers: every tool in tools/, with your note
+    (or else the description the model sees)."""
+    notes = load_notes(project / "tools")
+    options = {}
     for item in custom_tools(project):
-        options[item["ref"]] = f"{item['name']} ({item['ref'].split(':')[0]}.py)"
+        about = notes.get(item["ref"]) or first_line(item.get("description", ""))
+        options[item["ref"]] = f"{item['ref']} — {about}" if about else item["ref"]
     return options
 
 

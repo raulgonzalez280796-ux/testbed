@@ -22,7 +22,16 @@ from testbed.providers.openai import OpenAIAdapter
 
 from .helpers import HomeTestCase, agent
 
-FILES = [{"name": "log.txt", "content": "hello", "access": {"A": ["read"]}}]
+FILES = [{"name": "log.txt", "content": "hello"}]
+# A tool that takes a file name, so each provider's tool-call arguments are exercised.
+READ_FILE = """from testbed import ToolContext, tool
+
+
+@tool
+def read_file(ctx: ToolContext, name: str) -> str:
+    \"\"\"Read a file.\"\"\"
+    return ctx.files.read(name)
+"""
 
 
 class Recorder:
@@ -52,6 +61,7 @@ class AdapterHttpTests(HomeTestCase):
         super().tearDown()
 
     async def trial(self, provider, model):
+        self.write_code("tools", "read_file", READ_FILE)
         path = self.scenario(files=FILES, agents=[agent(
             "A", provider=provider, model=model, turns=1, tools=["read_file"],
             system_prompt="Be brief.")])

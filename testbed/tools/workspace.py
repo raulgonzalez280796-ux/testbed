@@ -68,6 +68,10 @@ class Workspace:
         with path.open("ab") as stream:
             stream.write(data)
 
+    def only(self, name: str, tool_name: str) -> "Workspace":
+        """A view of this workspace limited to one file (for a tool that declares it)."""
+        return OneFileWorkspace(self, name, tool_name)
+
     def snapshot(self) -> dict[str, str]:
         files = {}
         for name in self.list():
@@ -76,3 +80,22 @@ class Workspace:
             except UnicodeDecodeError:
                 files[name] = "<binary>"
         return files
+
+
+class OneFileWorkspace(Workspace):
+    """The workspace as seen by a tool that declares `file=`: that file only."""
+
+    def __init__(self, parent: Workspace, name: str, tool_name: str):
+        super().__init__(parent.root, max_file_bytes=parent.max_file_bytes,
+                         max_input_bytes=parent.max_input_bytes)
+        self.allowed = name
+        self.tool_name = tool_name
+
+    def _path(self, name: str, *, must_exist: bool) -> Path:
+        if name != self.allowed:
+            raise WorkspaceError(
+                f"The tool {self.tool_name} works only on {self.allowed}, not {name!r}")
+        return super()._path(name, must_exist=must_exist)
+
+    def list(self) -> list[str]:
+        return [name for name in super().list() if name == self.allowed]

@@ -1,6 +1,6 @@
 # Two agents haggle over a price in a shared conversation. Each has a private
 # limit drawn at random per trial and shown only in its own prompt. Researcher
-# tools (tools/negotiation.py) record offers and close the deal.
+# tools (make_offer, accept_offer) record offers and close the deal.
 name: negotiation
 description: >
   A Seller (with a secret minimum price) and a Buyer (with a secret maximum)
@@ -38,7 +38,7 @@ agents:
       latest offer.
     continuation_prompt: ""
     turns: 6
-    tools: [negotiation:make_offer, negotiation:accept_offer]
+    tools: [make_offer, accept_offer]
   - id: Buyer
     provider: anthropic
     model: claude-haiku-5-5
@@ -52,7 +52,7 @@ agents:
       a price offer, and accept_offer to accept the seller's latest offer.
     continuation_prompt: ""
     turns: 6
-    tools: [negotiation:make_offer, negotiation:accept_offer]
+    tools: [make_offer, accept_offer]
 checks:
   - negotiation:deal_reached
   - negotiation:deal_price

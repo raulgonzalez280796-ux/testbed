@@ -12,13 +12,14 @@ import asyncio
 import inspect
 import json
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Annotated, Any, Callable, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 from ..providers.base import ToolSpec, tool_output_text
+from .workspace import NAME as FILE_NAME
 from .workspace import Workspace
 
 TOOL_ATTR = "__testbed_tool__"
@@ -39,8 +40,7 @@ class TrialControl:
 @dataclass
 class ToolContext:
     agent_id: str
-    files: Workspace                 # every workspace file, without per-agent limits
-    file_access: dict[str, set[str]]  # what this agent's built-in file tools may do
+    files: Workspace                 # the workspace; only its own file if the tool declares file=
     state: dict                      # shared by all tools and agents in one trial
     variables: dict
     rng: random.Random               # seeded per trial
@@ -71,10 +71,10 @@ class Tool:
     takes_ctx: bool
     is_async: bool
     arg_model: type[BaseModel]
-    ref: str = ""                    # how scenarios name it: "list_files", "read_log" or "stem:function"
-    source: Path | None = None       # None for built-ins and scenario tools
-    target_file: str | None = None   # scenario tools: the one file they act on
-    op: str | None = None            # scenario tools: read, write, append or list
+    ref: str = ""                    # how scenarios name it: "read_log", or "stem:function"
+    source: Path | None = None       # the .py file it came from
+    target_file: str | None = None   # @tool(file=...): the one file it may touch
+    op: str | None = None            # @tool(op=...): read, write, append or list (for the log)
 
     def spec(self) -> ToolSpec:
         return ToolSpec(name=self.name, description=self.description, parameters=self.parameters)
@@ -85,6 +85,9 @@ class Tool:
         except ValidationError as error:
             raise ToolError(f"Invalid arguments: {error.errors(include_url=False)}") from None
         kwargs = {name: getattr(parsed, name) for name in self.arg_model.model_fields}
+        if self.target_file and self.takes_ctx:
+            # A tool that declares its file can reach only that file.
+            ctx = replace(ctx, files=ctx.files.only(self.target_file, self.name))
         args = (ctx,) if self.takes_ctx else ()
         if self.is_async:
             result = await asyncio.wait_for(self.func(*args, **kwargs), timeout)
@@ -94,18 +97,32 @@ class Tool:
         return tool_output_text(result)
 
 
+OPS = ("read", "write", "append", "list")
+
+
+def file_target(tool: Tool, arguments: dict) -> tuple[str | None, str | None]:
+    """(file, op) a call acts on, as the tool declares it with @tool(file=..., op=...)."""
+    return tool.target_file, tool.op
+
+
 def tool(
     func: Callable | None = None, *, name: str | None = None,
     description: str | None = None, schema: dict | None = None,
+    file: str | None = None, op: str | None = None,
 ):
-    """Mark a function as a tool. Use as @tool or @tool(name=..., description=..., schema=...).
+    """Mark a function as a tool. Use as @tool, or with options:
 
-    `schema` replaces the generated JSON schema shown to the model (arguments
-    are still validated against the type hints).
+    - `file`: the one workspace file this tool works on. Inside the tool,
+      `ctx.files` then refuses every other file.
+    - `op`: what it does to files: read, write, append or list. Recorded on each
+      call, so checks can ask "who appended to log.txt?" whatever the tool is called.
+    - `description` replaces the docstring as the text the model sees.
+    - `schema` replaces the generated JSON schema shown to the model (arguments
+      are still validated against the type hints).
     """
 
     def mark(function: Callable) -> Callable:
-        made = make_tool(function, name=name, description=description, schema=schema)
+        made = make_tool(function, name=name, description=description, schema=schema, file=file, op=op)
         setattr(function, TOOL_ATTR, made)
         return function
 
@@ -115,10 +132,15 @@ def tool(
 def make_tool(
     function: Callable, *, name: str | None = None,
     description: str | None = None, schema: dict | None = None,
+    file: str | None = None, op: str | None = None,
 ) -> Tool:
     tool_name = name or function.__name__
     if not tool_name.replace("_", "").isalnum() or not tool_name[0].isalpha():
         raise ValueError(f"tool name {tool_name!r} must start with a letter and use letters, digits, _")
+    if op is not None and op not in OPS:
+        raise ValueError(f"tool {tool_name}: op must be one of {', '.join(OPS)}")
+    if file is not None and not FILE_NAME.match(file):
+        raise ValueError(f"tool {tool_name}: file {file!r} is not a plain file name")
     takes_ctx, arg_model = argument_model(function, tool_name)
     return Tool(
         name=tool_name,
@@ -128,6 +150,8 @@ def make_tool(
         takes_ctx=takes_ctx,
         is_async=inspect.iscoroutinefunction(function),
         arg_model=arg_model,
+        target_file=file,
+        op=op,
     )
 
 

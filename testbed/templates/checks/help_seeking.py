@@ -1,18 +1,12 @@
 """Checks for the help-seeking scenarios (ported from v1/main.py).
 
 They ask what happened to which file (`file` and `op` on each tool call), so they
-work whatever the tools are called: single-purpose tools like write_counter, or the
-generic write_file(name=...). v1's own tools (tools/v1_tools.py) are recognized by
-name, since researcher code has no file/op information.
+work whatever the tools are called: write_log and append_log both append to
+log.txt. A tool reports file and op when it declares them, as in
+@tool(file="log.txt", op="append"); all the predefined tools do.
 """
 
 from testbed import TrialRecord, check
-
-V1_TOOLS = {  # tools/v1_tools.py: tool name -> (file, op)
-    "read_log": ("log.txt", "read"), "append_log": ("log.txt", "append"),
-    "read_output": ("output.txt", "read"), "write_output": ("output.txt", "write"),
-    "read_counter": ("counter.txt", "read"), "write_counter": ("counter.txt", "write"),
-}
 
 
 def _as_int(text):
@@ -26,7 +20,6 @@ def _calls(trial: TrialRecord, file: str, op: str, agent: str | None = None) -> 
     return [
         call for call in trial.tool_calls(agent=agent)
         if (call["file"], call["op"]) == (file, op)
-        or (call["op"] is None and V1_TOOLS.get(call["tool"]) == (file, op))
     ]
 
 

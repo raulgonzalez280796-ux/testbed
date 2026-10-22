@@ -44,7 +44,11 @@ python -m testbed cancel runs/<batch_id>
 
 **"schedule.order leaves out …".** A hand-written scenario's `schedule.order` must list every agent. The UI editor adds missing agents at the end by itself.
 
-**A tool or check is "missing".** The scenario refers to `file:function`, and that file or function doesn't exist in `tools/` or `checks/`, or the file has an error. Open the Tools & checks page: each file shows **ok** or the error with its line number.
+**"no tool called 'read_log': there is no file tools/read_log.py".** An agent lists a tool that isn't in the project's `tools/` folder. Add it on the Tools page, or take it off the agent. The predefined tools (`check_env`, `read_log`, `write_log`, …) come with `python -m testbed init <project>`, which only adds files that are missing, so it is safe to run on an existing project.
+
+**A tool is marked ✗ on the Tools page, or a check is "missing".** Open the tool: its problems are listed with line numbers. A check is named `file:function` and lives in `checks/`; the Checks page shows **ok** or the error for each file.
+
+**"'access' was removed" or "the scenario's 'tools:' section was removed".** The scenario was written for an older version, where files had an access grid and a scenario could declare its own tools. Now every tool is a file in `tools/`, and the file it works on is part of the tool. Open the scenario in the UI: the editor removes the old parts, explains what changed, and you save. Then check each agent's tools on the Agents tab. In a hand-written file, delete `access:` under each file and the top-level `tools:` section. Agents that used `read_file`, `write_file` or `append_file` need tools that each work on one file, such as `read_log` or `write_output`.
 
 **Saving from the UI removed my comments.** Saving writes a standard YAML layout. The first time a file with comments is saved from the UI, the original is kept next to it as `<name>.yaml.bak`.
 

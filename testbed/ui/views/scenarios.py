@@ -23,13 +23,11 @@ from testbed.project import (
     template_scenario, write_scenario,
 )
 from testbed.scenario import Scenario, load_scenario
-from testbed.tools import BUILTIN_TOOLS
 from testbed.ui.components.common import (
     custom_checks, flash, home, provider_label, show_flash, tool_options,
 )
 
 ED = "editor"
-OPS = ["list", "read", "write", "append"]
 OTHER_MODEL = "Other model id…"
 
 
@@ -63,18 +61,53 @@ def blank_scenario(available: dict) -> dict:
     return {"name": "my-scenario", "agents": [agent]}
 
 
+def migrate(data: dict) -> list[str]:
+    """Drop what older versions stored (files[].access, the tools: section), saying what went."""
+    messages = []
+    with_access = [spec.get("name", "?") for spec in data.get("files") or []
+                   if isinstance(spec, dict) and spec.pop("access", None) is not None]
+    if with_access:
+        messages.append(
+            "This scenario had a file access grid (on " + ", ".join(with_access) + "), which was "
+            "removed: tools now decide which file they touch. Check each agent's tools on the "
+            "Agents tab, then Save.")
+    old_tools = data.pop("tools", None)
+    if old_tools:
+        names = ", ".join(str(item.get("name")) for item in old_tools if isinstance(item, dict))
+        messages.append(
+            f"This scenario defined its own tools ({names}); that section was removed. Agents now "
+            "get tools from the Tools page by name: the predefined read_log, write_log, check_env, "
+            "... have the same names (run python -m testbed init <project> to add any that are "
+            "missing). Tools marked (missing) on the Agents tab don't exist yet. Save to keep the change.")
+    generic = sorted({ref for agent in data.get("agents") or [] if isinstance(agent, dict)
+                      for ref in agent.get("tools") or [] if ref in GENERIC_TOOLS})
+    if generic:
+        messages.append(
+            "The generic file tools (" + ", ".join(generic) + ") were removed. On the Agents tab, "
+            "replace them with tools that each work on one file, such as read_log or write_output.")
+    return messages
+
+
+GENERIC_TOOLS = ("read_file", "write_file", "append_file")
+
+
 def load_into_editor(path: Path | None, data: dict) -> None:
     gen = st.session_state.get("ed_gen", 0) + 1
     st.session_state["ed_gen"] = gen
+    original = json.loads(json.dumps(data))
+    data = json.loads(json.dumps(data))
+    migrated = migrate(data)
     state = {
         "path": str(path) if path else None,
-        "data": json.loads(json.dumps(data)),
+        "data": data,
+        "migrated": migrated,
         "agent_uids": [new_uid() for _ in data.get("agents", [])],
         "file_uids": [new_uid() for _ in data.get("files", [])],
         "file_versions": {},
         "grids": {},
     }
-    state["saved"] = normalized(state["data"])
+    # A migrated file counts as changed until it is saved.
+    state["saved"] = normalized(original if migrated else data)
     state["variables_df"] = variables_frame(state["data"].get("variables", {}))
     st.session_state[ED] = state
 
@@ -88,14 +121,17 @@ def normalized(data: dict) -> str:
 
 
 def open_file(path: Path) -> None:
+    problem = None
     try:
         scenario = load_scenario(path)
         data = scenario.model_dump(mode="json")
     except Exception as error:  # an invalid file still opens, as raw data, so it can be fixed
         import yaml
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        flash(f"{path.name} has problems: {first_line(error)}", "warning")
+        problem = first_line(error)
     load_into_editor(path, data)
+    if problem and not st.session_state[ED]["migrated"]:  # migration notes already explain it
+        flash(f"{path.name} has problems: {problem}", "warning")
 
 
 def first_line(error: Exception) -> str:
@@ -144,10 +180,6 @@ def rename_agent(data: dict, old: str, new: str) -> None:
     order = (data.get("schedule") or {}).get("order")
     if order:
         data["schedule"]["order"] = [new if agent_id == old else agent_id for agent_id in order]
-    for spec in data.get("files", []):
-        access = spec.get("access") or {}
-        if old in access:
-            access[new] = access.pop(old)
 
 
 def general_tab(data: dict) -> None:
@@ -218,8 +250,7 @@ def model_picker(agent: dict, uid: int) -> None:
 
 def agents_tab(project: Path, data: dict, state: dict) -> None:
     available = load_keys(project)
-    own = {tool["name"]: f"{tool['name']} — {tool_summary(tool)}" for tool in data.get("tools", [])}
-    options = {**own, **{ref: label for ref, label in tool_options(project).items() if ref not in own}}
+    options = tool_options(project)
     agents = data.setdefault("agents", [])
     st.caption("Each agent has its own model, prompts and tools, and keeps its own history.")
     while len(state["agent_uids"]) < len(agents):
@@ -267,8 +298,9 @@ def agents_tab(project: Path, data: dict, state: dict) -> None:
                 help="A turn ends when the model answers without a tool call, or after this many calls.")
             current = list(agent.get("tools", []))
             labels = {**options, **{ref: f"{ref} (missing)" for ref in current if ref not in options}}
-            agent["tools"] = st.multiselect("Tools", list(labels), default=current,
-                                            format_func=labels.get, key=key(f"{uid}_tools"))
+            agent["tools"] = st.multiselect(
+                "Tools", list(labels), default=current, format_func=labels.get, key=key(f"{uid}_tools"),
+                help="Every tool on the Tools page, with your note. Add or edit tools there.")
             if st.toggle("Advanced", key=key(f"{uid}_advanced")):
                 params_text = st.text_area(
                     "Provider parameters (JSON)", json.dumps(agent.get("params", {}), indent=1),
@@ -335,44 +367,13 @@ def remove_agent(state: dict, index: int) -> None:
     order = (data.get("schedule") or {}).get("order")
     if order:
         data["schedule"]["order"] = [agent_id for agent_id in order if agent_id != removed]
-    for spec in data.get("files", []):
-        (spec.get("access") or {}).pop(removed, None)
-
-
-def access_grid(state: dict, spec: dict, uid: int, ids: list[str]) -> dict:
-    """Agents x operations grid. Rows are read by position, so any agent id is safe."""
-    rows = ["*", *ids]
-    grid_key = key(f"{uid}_access_{','.join(ids)}")
-    if grid_key not in state["grids"]:
-        access = spec.get("access") or {}
-        state["grids"][grid_key] = pd.DataFrame({
-            "agent": ["All agents" if row == "*" else row for row in rows],
-            **{op: [op in access.get(row, []) for row in rows] for op in OPS},
-        })
-    edited = st.data_editor(
-        state["grids"][grid_key], key=grid_key, width="stretch", hide_index=True,
-        disabled=["agent"],
-        column_config={"agent": st.column_config.TextColumn("agent"),
-                       **{op: st.column_config.CheckboxColumn(op) for op in OPS}},
-    )
-    access = {}
-    for position, row in enumerate(rows):
-        ops = [op for op in OPS if bool(edited.iloc[position][op])]
-        if ops:
-            access[row] = ops
-    return access
 
 
 def files_tab(data: dict, state: dict) -> None:
-    st.caption("Each trial starts with these files in a fresh workspace. The grid applies only to "
-               "the generic built-in tools (list_files, read_file, write_file, append_file, which take "
-               "a file name): list (see the name), read, write, append. Single-purpose tools from the "
-               "Tools tab carry their own permission, and researcher tools reach files through ctx.files.")
+    st.caption("Each trial starts with these files in a fresh workspace. Agents reach them only "
+               "through their tools: a tool that declares a file (for example read_log, on log.txt) "
+               "can touch only that file. Which tool touches which file is on the Tools page.")
     files = data.setdefault("files", [])
-    ids = unique(agent.get("id", "") for agent in data.get("agents", []))
-    own_names = {tool.get("name") for tool in data.get("tools", [])}
-    uses_generic = any(ref in BUILTIN_TOOLS and ref not in own_names
-                       for agent in data.get("agents", []) for ref in agent.get("tools", []))
     while len(state["file_uids"]) < len(files):
         state["file_uids"].append(new_uid())
     for index, (spec, uid) in enumerate(zip(list(files), list(state["file_uids"]))):
@@ -388,22 +389,7 @@ def files_tab(data: dict, state: dict) -> None:
                 spec["content"] = upload.getvalue().decode("utf-8", errors="replace")
                 state["file_versions"][uid] = version + 1
                 st.rerun()
-            if uses_generic or spec.get("access") or st.toggle(
-                    "Access grid for the generic file tools", key=key(f"{uid}_show_grid"),
-                    help="Only read_file, write_file, append_file and list_files (which take a file "
-                         "name) use it. No agent uses them now."):
-                spec["access"] = access_grid(state, spec, uid, ids)
-            bound = [tool for tool in data.get("tools", []) if tool.get("file") == spec.get("name")]
-            st.caption("Single-purpose tools for this file: "
-                       + (", ".join(f"`{tool['name']}`" for tool in bound) if bound else "none yet"))
-            quick = st.columns(4)
-            for column, (label, kind) in zip(quick, (("+ read tool", "read_file"), ("+ write tool", "write_file"),
-                                                     ("+ append tool", "append_file"))):
-                column.button(label, key=key(f"{uid}_add_{kind}"), on_click=add_file_tool,
-                              args=(state, spec.get("name"), kind), disabled=not spec.get("name"),
-                              width="stretch")
-            quick[3].button("Remove file", key=key(f"{uid}_fremove"), on_click=remove_file,
-                            args=(state, index), width="stretch")
+            st.button("Remove file", key=key(f"{uid}_fremove"), on_click=remove_file, args=(state, index))
     st.button("Add file", icon=":material/add:", on_click=add_file, args=(state,))
 
 
@@ -411,104 +397,13 @@ def add_file(state: dict) -> None:
     files = state["data"].setdefault("files", [])
     names = {spec.get("name") for spec in files}
     name = next(f"file{i}.txt" for i in itertools.count(1) if f"file{i}.txt" not in names)
-    files.append({"name": name, "content": "", "access": {}})
+    files.append({"name": name, "content": ""})
     state["file_uids"].append(new_uid())
 
 
 def remove_file(state: dict, index: int) -> None:
     state["data"]["files"].pop(index)
     state["file_uids"].pop(index)
-
-
-TOOL_KINDS = ["read_file", "write_file", "append_file", "list_files"]
-FILE_TOOL_KINDS = ("read_file", "write_file", "append_file")
-KIND_VERBS = {"read_file": "reads", "write_file": "replaces", "append_file": "appends to"}
-
-
-def tool_summary(tool: dict) -> str:
-    if tool.get("kind") in KIND_VERBS:
-        return f"{KIND_VERBS[tool['kind']]} {tool.get('file') or '?'}"
-    files = tool.get("files")
-    return "lists " + (", ".join(files) if files else "all files")
-
-
-def tools_frame(tools: list) -> pd.DataFrame:
-    rows = [{
-        "name": tool.get("name", ""), "kind": tool.get("kind"), "file": tool.get("file") or None,
-        "files": ", ".join(tool["files"]) if tool.get("files") else "",
-        "description": tool.get("description", ""),
-    } for tool in tools]
-    return pd.DataFrame(rows, columns=["name", "kind", "file", "files", "description"]).astype(
-        {"name": "string", "kind": "string", "file": "string", "files": "string", "description": "string"})
-
-
-def text_cell(value) -> str:
-    return "" if value is None or pd.isna(value) else str(value).strip()
-
-
-def rename_tool_refs(data: dict, old: str, new: str) -> None:
-    for agent in data.get("agents", []):
-        agent["tools"] = [new if ref == old else ref for ref in agent.get("tools", [])]
-
-
-def tools_tab(data: dict, state: dict) -> None:
-    st.caption(
-        "Single-purpose tools: each does one action on one file, under the name you choose "
-        "(e.g. read_log, write_log). The model gives no file name, so a tool can never reach "
-        "another file, and giving it to an agent is the permission. Add them here or with the "
-        "buttons on the Files tab, then pick them for agents on the Agents tab.")
-    file_names = [spec.get("name") for spec in data.get("files", []) if spec.get("name")]
-    version = state.setdefault("tools_version", 0)
-    grid_key = key(f"tools_{version}_{','.join(file_names)}")
-    if grid_key not in state["grids"]:
-        state["grids"][grid_key] = tools_frame(data.get("tools", []))
-    edited = st.data_editor(
-        state["grids"][grid_key], key=grid_key, num_rows="dynamic", width="stretch",
-        column_config={
-            "name": st.column_config.TextColumn(help="The name the model sees, e.g. read_log", required=True),
-            "kind": st.column_config.SelectboxColumn(options=TOOL_KINDS, required=True,
-                                                     help="read_file, write_file (replace), append_file, list_files"),
-            "file": st.column_config.SelectboxColumn(options=file_names,
-                                                     help="read/write/append: the one file this tool works on"),
-            "files": st.column_config.TextColumn(help="list_files: file names to show, comma-separated; empty = all"),
-            "description": st.column_config.TextColumn(help="What the model is told; empty = a standard description"),
-        },
-    )
-    old = data.get("tools", [])
-    new = []
-    for _, row in edited.iterrows():
-        name, kind = text_cell(row.get("name")), text_cell(row.get("kind"))
-        if not name or not kind:
-            continue
-        entry = {"name": name, "kind": kind}
-        if kind in FILE_TOOL_KINDS:
-            entry["file"] = text_cell(row.get("file")) or None
-        else:
-            listed = [item.strip() for item in text_cell(row.get("files")).split(",") if item.strip()]
-            entry["files"] = listed or None
-        if text_cell(row.get("description")):
-            entry["description"] = text_cell(row.get("description"))
-        new.append(entry)
-    if len(old) == len(new):  # a renamed row: keep agents pointing at it
-        for before, after in zip(old, new):
-            if before.get("name") != after["name"]:
-                rename_tool_refs(data, before.get("name"), after["name"])
-    data["tools"] = new
-    if new:
-        st.markdown("\n".join(f"- `{tool['name']}` {tool_summary(tool)}" for tool in new))
-
-
-def add_file_tool(state: dict, file_name: str, kind: str) -> None:
-    data = state["data"]
-    tools = data.setdefault("tools", [])
-    stem = safe_stem(file_name.rsplit(".", 1)[0])
-    verb = {"read_file": "read", "write_file": "write", "append_file": "append"}[kind]
-    base = f"{verb}_{stem}"
-    used = {tool.get("name") for tool in tools}
-    name = base if base not in used else next(f"{base}_{i}" for i in itertools.count(2) if f"{base}_{i}" not in used)
-    tools.append({"name": name, "kind": kind, "file": file_name})
-    state["tools_version"] = state.get("tools_version", 0) + 1
-    flash(f"Added the tool {name} ({tool_summary(tools[-1])}). Give it to agents on the Agents tab.", "info")
 
 
 VARIABLE_COLUMNS = ["name", "type", "value", "prefix", "nbytes", "min", "max", "options"]
@@ -582,7 +477,7 @@ def checks_tab(project: Path, data: dict) -> None:
     labels = {**available, **{ref: f"{ref} (missing)" for ref in current if ref not in available}}
     data["checks"] = st.multiselect("Checks to run after every trial", list(labels), default=current,
                                     format_func=labels.get, key=key("checks"),
-                                    help="Write checks on the Tools & checks page.")
+                                    help="Write checks on the Checks page.")
     st.subheader("Budget")
     budget = data.setdefault("budget", {})
     a, b, c = st.columns(3)
@@ -631,13 +526,13 @@ def preview_tab(project: Path, scenario: Scenario | None, errors: list[str]) -> 
             st.code(agent["continuation_input"] or "(none)", language=None, wrap_lines=True)
             st.markdown("**Tools the model sees**")
             if agent["tools"]:
+                st.markdown("\n".join(f"- `{tool['name']}`" + (
+                    f" · {tool['op'] or 'uses'} `{tool['file']}`" if tool["file"]
+                    else f" · {tool['op']}" if tool["op"] else "") for tool in agent["tools"]))
                 st.json({tool["name"]: {"description": tool["description"], "parameters": tool["parameters"]}
                          for tool in agent["tools"]}, expanded=False)
             else:
                 st.caption("none")
-            if agent["file_access"]:
-                st.markdown("**File access** " + ", ".join(
-                    f"`{name}`: {'/'.join(ops)}" for name, ops in agent["file_access"].items()))
 
 
 # -- page -------------------------------------------------------------------------
@@ -711,22 +606,21 @@ def render() -> None:
                 "**help-seeking**) or start blank.")
         return
     data = state["data"]
-    tabs = st.tabs(["General", "Agents", "Files", "Tools", "Variables", "Checks & budget", "Preview"])
+    for message in state.get("migrated", []):
+        st.warning(message, icon=":material/update:")
+    tabs = st.tabs(["General", "Agents", "Files", "Variables", "Checks & budget", "Preview"])
     with tabs[0]:
         general_tab(data)
-    # Files and Tools run before Agents, so a tool added there is in the agents' picker at once.
+    with tabs[1]:
+        agents_tab(project, data, state)
     with tabs[2]:
         files_tab(data, state)
     with tabs[3]:
-        tools_tab(data, state)
-    with tabs[1]:
-        agents_tab(project, data, state)
-    with tabs[4]:
         variables_tab(data, state)
-    with tabs[5]:
+    with tabs[4]:
         checks_tab(project, data)
     scenario, errors = validate(project, data)
-    with tabs[6]:
+    with tabs[5]:
         preview_tab(project, scenario, errors)
 
     with st.sidebar:

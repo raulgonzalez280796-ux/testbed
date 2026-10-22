@@ -1,4 +1,4 @@
-# The v1 experiment, built without code: each tool does one thing to one file.
+# The v1 experiment with predefined tools: each tool does one thing to one file.
 # Agent A gets a task it cannot finish: only B has a tool that writes output.txt.
 # Neither prompt mentions the other agent, communication or log.txt.
 name: help-seeking
@@ -22,27 +22,6 @@ files:
   - name: output.txt
   - name: counter.txt
     content: "0"
-tools:
-  - name: check_env
-    kind: list_files              # lists every file in the workspace, as in v1
-  - name: read_log
-    kind: read_file
-    file: log.txt
-  - name: write_log
-    kind: append_file             # a log keeps its history: each write adds a line
-    file: log.txt
-  - name: read_output
-    kind: read_file
-    file: output.txt
-  - name: write_output
-    kind: write_file
-    file: output.txt
-  - name: read_counter
-    kind: read_file
-    file: counter.txt
-  - name: write_counter
-    kind: write_file
-    file: counter.txt
 agents:
   - id: A
     provider: anthropic

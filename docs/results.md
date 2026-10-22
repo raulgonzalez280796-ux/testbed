@@ -91,7 +91,7 @@ Written before the trial starts. It records everything that shaped what the agen
 | `interaction`, `rounds`, `timeout_seconds`, `limits`, `budget` | Settings in effect |
 | `variables` | This trial's values |
 | `initial_files` | Each file's content after variables were filled in |
-| `agents` | Per agent: provider, model, params, turns, calls per turn, timeouts and retries; the **rendered** system prompt, turn-1 input and continuation prompt; its file access; each tool's name, description and JSON schema **as sent**, with the SHA-256 of its source file (researcher tools) or its `file` and `op` (single-purpose tools); and the adapter class and SDK version |
+| `agents` | Per agent: provider, model, params, turns, calls per turn, timeouts and retries; the **rendered** system prompt, turn-1 input and continuation prompt; each tool's `ref`, name, description and JSON schema **as sent**, the SHA-256 of its source file, and its `file` and `op` if it declares them; and the adapter class and SDK version |
 | `code_sha256` | SHA-256 of every frozen code file in the batch |
 | `testbed_version`, `python`, `platform`, `packages` | Software versions |
 
@@ -129,7 +129,7 @@ Most events also carry `agent_id`, `round` and `turn`; model and tool events add
 | `empty_reply` | `call`, `stop_reason` | A reply with no content (not added to the history) |
 | `rate_limited` / `call_retry` | `provider`, `attempt`, `delay_seconds`, `error_kind`, `status_code`, `message` | A model call is retried: after a 429, or after a server, network or timeout error |
 | `model_call_failed` | `provider`, `duration_seconds`, `attempts`, `request`, `error_kind`, `error_type`, `status_code`, `message` | A model call failed for good; the trial ends as `infra_error` |
-| `tool_started` | `call_id`, `tool`, `arguments`, and `file`, `op` when known | Before each tool call. `file` and `op` (read, write, append, list) are set for single-purpose and generic file tools |
+| `tool_started` | `call_id`, `tool`, `arguments`, and `file`, `op` when known | Before each tool call. `file` and `op` (read, write, append, list) are set for tools that declare them with `@tool(file=..., op=...)`, as the predefined tools do |
 | `tool_completed` | `call_id`, `tool`, `result` (and `file`, `op`) | The tool returned `result` |
 | `tool_failed` | `call_id`, `tool`, `error_type`, `error` (and `file`, `op`) | Refused or raised; `error` is what the model was told |
 | `tool_skipped` | `call_id`, `tool`, `arguments`, `reason` | Not run because the reply was cut off (`truncated`) |

@@ -28,7 +28,6 @@ from .keys import redact
 from .logger import EventLogger, compress_events, read_events
 from .providers.base import ProviderAdapter, Usage
 from .scenario import Scenario, draw_variables, render, scenario_hash, trial_seed, turn_one_text
-from .tools.builtin import scenario_tools
 from .tools.loader import file_sha256, resolve_agent_tools, resolve_check
 from .tools.workspace import Workspace
 
@@ -144,9 +143,8 @@ async def run_trial(batch: BatchContext, index: int) -> dict:
 
     agents: dict[str, AgentRuntime] = {}
     agent_manifest = []
-    own_tools = scenario_tools(scenario)
     for spec in scenario.agents:
-        tools = resolve_agent_tools(spec.tools, batch.tools_dir, spec.id, own_tools)
+        tools = resolve_agent_tools(spec.tools, batch.tools_dir, spec.id)
         adapter = batch.adapters.get(
             spec.provider, batch.keys.get(spec.provider, ""),
             spec.request_timeout_seconds, spec.max_retries,
@@ -156,7 +154,6 @@ async def run_trial(batch: BatchContext, index: int) -> dict:
             system=render(spec.system_prompt, values),
             turn_one=turn_one_text(scenario, spec, values),
             continuation=render(spec.continuation_prompt, values),
-            file_access=scenario.file_access(spec.id),
         )
         agents[spec.id] = runtime
         agent_manifest.append({
@@ -168,12 +165,12 @@ async def run_trial(batch: BatchContext, index: int) -> dict:
             "system_prompt": runtime.system,
             "turn_one_input": runtime.turn_one,
             "continuation_prompt": runtime.continuation,
-            "file_access": {name: sorted(ops) for name, ops in runtime.file_access.items()},
             "tools": [
                 {"ref": t.ref, "name": t.name, "description": t.description,
                  "parameters": t.parameters,
                  "source_sha256": file_sha256(t.source) if t.source else None,
-                 **({"op": t.op, "file": t.target_file} if t.op else {})}
+                 **({"file": t.target_file} if t.target_file else {}),
+                 **({"op": t.op} if t.op else {})}
                 for t in tools.values()
             ],
             "adapter": {"class": type(adapter).__name__, "sdk": adapter.sdk,

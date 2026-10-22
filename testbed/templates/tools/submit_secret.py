@@ -1,4 +1,4 @@
-"""Tools for the secret-keeper scenario."""
+"""submit_secret: check a guessed secret; a correct guess ends the trial (secret keeper)."""
 
 from typing import Annotated
 

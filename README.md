@@ -16,7 +16,7 @@ Version **0.1.0**: the first version (see [CHANGELOG](CHANGELOG.md)). The engine
 
 | Guide | Contents |
 |---|---|
-| [Writing scenarios, tools and checks](docs/authoring.md) | How a trial runs, interaction modes, file access, the tool and check APIs |
+| [Writing scenarios, tools and checks](docs/authoring.md) | How a trial runs, interaction modes, the tools library, the tool and check APIs |
 | [Scenario reference](docs/scenario-reference.md) | Every field of the scenario file (generated from the code) |
 | [What a run leaves on disk](docs/results.md) | Folders, manifest, result and event fields, statuses, loading results in pandas |
 | [Troubleshooting](docs/troubleshooting.md) | Keys, rate limits, stopped batches, the UI |
@@ -57,21 +57,22 @@ The UI listens only on this computer (127.0.0.1) and has no login, so do not exp
 
 | Page | What you do there |
 |---|---|
-| **Scenarios** | Create from a template or start blank. Then, per tab: <ul><li>**General**: interaction mode, turn order, rounds, timeout, shared task.</li><li>**Agents**: provider, model, the three prompts, turns, model calls per turn, tools.</li><li>**Files**: initial content, plus an access grid of agents × list/read/write/append.</li><li>**Variables**, **Checks & budget**.</li><li>**Preview**: exactly what each agent will receive, with no API call.</li></ul> Saving writes `scenarios/<name>.yaml`, the same file the CLI runs. |
-| **Tools & checks** | Paste code into the editor or upload a `.py` file. It is validated in a separate process and saved to `tools/` or `checks/`. |
+| **Scenarios** | Create from a template or start blank. Then, per tab: <ul><li>**General**: interaction mode, turn order, rounds, timeout, shared task.</li><li>**Agents**: provider, model, the three prompts, turns, model calls per turn, and which tools it gets (from the Tools page).</li><li>**Files**: names and initial content.</li><li>**Variables**, **Checks & budget**.</li><li>**Preview**: exactly what each agent will receive, with no API call.</li></ul> Saving writes `scenarios/<name>.yaml`, the same file the CLI runs. |
+| **Tools** | Every tool in the project (one Python file each), with your note, what the model is told, the file it works on and which scenarios use it. Add a tool from a starter, pasted code or a `.py` file. Edit, check (Python and tool rules), duplicate or delete it. |
+| **Checks** | Paste code into the editor or upload a `.py` file. It is validated in a separate process and saved to `checks/`. |
 | **Run** | M trials in total, N at a time, an optional seed and label. Batches above 20 trials show a token estimate first. A live progress view has cancel and resume. A batch keeps running if you close the browser. |
 | **Results** | A check summary per batch, a filterable trials table, and per trial: <ul><li>a turn-by-turn timeline;</li><li>the final files;</li><li>the checks, which you can re-run with the batch's copy or your current code;</li><li>the raw model calls;</li><li>the manifest and downloads.</li></ul> |
 | **Settings** | API keys, saved to `.env` and tested with one small request; rate limits per provider. |
 
 ## Templates
 
-`init` copies these into `scenarios/`, `tools/` and `checks/`:
+`init` copies these into `scenarios/`, with the tools they use into `tools/` and their checks into `checks/`:
 
 | Template | What it shows |
 |---|---|
-| `help_seeking` | The v1 experiment with single-purpose tools and no code (A: `check_env`, `read_log`, `write_log`; B also `read_output`, `write_output`, `read_counter`, `write_counter`). A can't finish its task; B could help. Do they use the shared log? |
-| `help_seeking_v1` | An exact port of v1: v1's own tools, prompts, model and limits, so results compare with v1 runs. |
-| `secret_keeper` | Conversation mode with a researcher tool. A Guard holds a random secret; a Requester tries to get it and submits it with `submit_secret`. |
+| `help_seeking` | The v1 experiment with predefined tools that each work on one file (A: `check_env`, `read_log`, `write_log`; B also `read_output`, `write_output`, `read_counter`, `write_counter`). A can't finish its task; B could help. Do they use the shared log? |
+| `help_seeking_v1` | An exact port of v1: v1's tool names and schemas, prompts, model and limits, so results compare with v1 runs. |
+| `secret_keeper` | Conversation mode with a tool that ends the trial. A Guard holds a random secret; a Requester tries to get it and submits it with `submit_secret`. |
 | `negotiation` | Conversation mode with private per-trial values: each side has a secret price limit drawn at random. Offers and deals happen through tools. |
 
 ## API keys
@@ -160,7 +161,7 @@ When a provider answers 429 (rate limited), the call waits as long as the provid
 | `.env` | API keys (never commit it; `init` adds it to `.gitignore`) |
 | `settings.yaml` | Rate limits per provider (optional) |
 | `scenarios/*.yaml` | Scenarios (see Templates above) |
-| `tools/*.py` | Your tools. Scenarios refer to them as `file:function`, e.g. `v1_tools:read_log`. |
+| `tools/*.py` | Tools, one per file: `tools/read_log.py` is the tool `read_log`. `tools/notes.yaml` holds your notes about them. |
 | `checks/*.py` | Your checks, also as `file:function`. |
 | `runs/<batch>/` | Results: `summary.csv`, plus one `trial_NNNN/` folder per trial. |
 
@@ -168,23 +169,24 @@ When a provider answers 429 (rate limited), the call waits as long as the provid
 
 ## Writing a tool
 
-```python
-from typing import Annotated
-from testbed import tool, ToolContext
+A tool is one Python file in `tools/`, with one `@tool` function of the same name:
 
-@tool
-def submit_answer(ctx: ToolContext, answer: Annotated[str, "Your final answer."]) -> str:
+```python
+from testbed import ToolContext, tool
+
+@tool(file="answer.txt", op="write")
+def submit_answer(ctx: ToolContext, answer: str) -> str:
     """Submit your final answer."""
     ctx.files.write("answer.txt", answer)
     return "Submitted."
 ```
 
-The model sees the function name, the docstring and a JSON schema built from the type hints. `ctx` is filled in by the testbed and hidden from the model. It gives your tool:
+The model sees the function name, the docstring and a JSON schema built from the type hints. `file=` limits the tool to that one file, and `op=` (read, write, append, list) is logged with every call. `ctx` is filled in by the testbed and hidden from the model. It gives your tool:
 
 | Attribute | What it is |
 |---|---|
 | `ctx.agent_id` | The calling agent |
-| `ctx.files` | Every workspace file |
+| `ctx.files` | The workspace files (only the declared one with `file=`) |
 | `ctx.state` | A dict shared by all tools in the trial |
 | `ctx.variables` | The trial's variable values |
 | `ctx.rng` | A seeded random generator |
@@ -194,7 +196,7 @@ The model sees the function name, the docstring and a JSON schema built from the
 
 Raise `ToolError("...")` to send a clean error message back to the model. Tool code runs on your machine with your permissions.
 
-You often need no code at all. A scenario's `tools:` section declares **single-purpose tools**, each doing one action on one file under your own name (e.g. `read_log`, `write_log`). The generic built-ins `list_files`, `read_file`, `write_file` and `append_file` take a file name instead, with per-agent permissions in each file's access grid. See [Tools: three kinds](docs/authoring.md#tools-three-kinds).
+`init` adds ready-made tools such as `check_env`, `read_log`, `write_log` and `write_output`; the Tools page also has starters for reading, writing or appending to one file. See [Tools](docs/authoring.md#tools).
 
 ## Writing a check
 
@@ -206,7 +208,7 @@ def output_matches_token(trial: TrialRecord) -> bool:
     return trial.files.get("output.txt") == trial.variables["token"]
 ```
 
-`trial.tool_calls(agent=..., tool=...)` and `trial.messages(agent)` give you the ordered trace. Checks run after each completed trial; trials that failed for infrastructure reasons are marked n/a.
+`trial.tool_calls(agent=..., tool=..., file=..., op=...)` and `trial.messages(agent)` give you the ordered trace. Checks run after each completed trial; trials that failed for infrastructure reasons are marked n/a.
 
 ## Tests
 

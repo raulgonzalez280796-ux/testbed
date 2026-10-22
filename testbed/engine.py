@@ -20,9 +20,8 @@ from .providers.base import (
     ToolResult, ToolResults, Usage, UserInput,
 )
 from .scenario import AgentSpec, Scenario
-from .tools.builtin import file_target
-from .tools.decorator import Tool, ToolContext, ToolError, TrialControl
-from .tools.workspace import Workspace
+from .tools.decorator import Tool, ToolContext, ToolError, TrialControl, file_target
+from .tools.workspace import Workspace, WorkspaceError
 
 
 class TrialStopped(Exception):
@@ -41,7 +40,6 @@ class AgentRuntime:
     system: str
     turn_one: str
     continuation: str
-    file_access: dict[str, set[str]]
     history: list[Message] = field(default_factory=list)
     turns_taken: int = 0
     finished: bool = False
@@ -294,7 +292,7 @@ class Engine:
                 results.append(ToolResult(call.id, call.name, output, True))
                 continue
             ctx = ToolContext(
-                agent_id=agent.spec.id, files=self.workspace, file_access=agent.file_access,
+                agent_id=agent.spec.id, files=self.workspace,
                 state=self.state, variables=self.variables, rng=self.rng,
                 round=round_number, turn=turn,
                 _note=lambda message, _base=base, **data: self.log.emit(
@@ -303,9 +301,9 @@ class Engine:
             )
             try:
                 output = await tool.invoke(ctx, call.arguments, limits.tool_timeout_seconds)
-            except ToolError as error:
+            except (ToolError, WorkspaceError) as error:  # messages written for the model
                 output = str(error)
-                self.log.emit("tool_failed", **base, error_type="ToolError", error=output)
+                self.log.emit("tool_failed", **base, error_type=type(error).__name__, error=output)
                 results.append(ToolResult(call.id, call.name, output, True))
                 continue
             except asyncio.TimeoutError:

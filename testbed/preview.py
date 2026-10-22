@@ -6,7 +6,6 @@ import random
 from pathlib import Path
 
 from .scenario import Scenario, draw_variables, render, turn_one_text
-from .tools.builtin import scenario_tools
 from .tools.loader import resolve_agent_tools
 
 
@@ -19,9 +18,8 @@ def preview(home: Path, scenario: Scenario, seed: int = 0) -> dict:
     rng = random.Random(seed)
     values = draw_variables(scenario.variables, rng)
     agents = []
-    own_tools = scenario_tools(scenario)
     for spec in scenario.agents:
-        tools = resolve_agent_tools(spec.tools, home / "tools", spec.id, own_tools)
+        tools = resolve_agent_tools(spec.tools, home / "tools", spec.id)
         agents.append({
             "id": spec.id,
             "provider": spec.provider,
@@ -30,9 +28,9 @@ def preview(home: Path, scenario: Scenario, seed: int = 0) -> dict:
             "turn_one_input": turn_one_text(scenario, spec, values),
             "continuation_input": render(spec.continuation_prompt, values),
             "turns": spec.turns,
-            "file_access": {name: sorted(ops) for name, ops in scenario.file_access(spec.id).items()},
             "tools": [
-                {"name": t.name, "ref": t.ref, "description": t.description, "parameters": t.parameters}
+                {"name": t.name, "ref": t.ref, "description": t.description, "parameters": t.parameters,
+                 "file": t.target_file, "op": t.op}
                 for t in tools.values()
             ],
         })
@@ -67,6 +65,4 @@ def preview_text(data: dict) -> str:
             lines.append(f"{tool['name']}: {tool['description']}  params={tool['parameters'].get('properties', {})}")
         if not agent["tools"]:
             lines.append("(none)")
-        if agent["file_access"]:
-            lines.append(f"--- file access --- {agent['file_access']}")
     return "\n".join(lines)

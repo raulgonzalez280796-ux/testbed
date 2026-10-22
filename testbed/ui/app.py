@@ -13,7 +13,7 @@ from testbed import __version__
 from testbed.project import ensure_project
 from testbed.ui.components.code_box import code_editor
 from testbed.ui.components.common import home
-from testbed.ui.views import results, run, scenarios, settings, tools_page
+from testbed.ui.views import checks_page, results, run, scenarios, settings, tools_page
 
 st.set_page_config(page_title="llmArena testbed", page_icon=":material/hub:", layout="wide")
 
@@ -23,7 +23,8 @@ ensure_project(project)
 PAGES = {
     "scenarios": st.Page(scenarios.render, title="Scenarios", icon=":material/edit_note:",
                          url_path="scenarios", default=True),
-    "tools": st.Page(tools_page.render, title="Tools & checks", icon=":material/build:", url_path="tools"),
+    "tools": st.Page(tools_page.render, title="Tools", icon=":material/build:", url_path="tools"),
+    "checks": st.Page(checks_page.render, title="Checks", icon=":material/fact_check:", url_path="checks"),
     "run": st.Page(run.render, title="Run", icon=":material/play_arrow:", url_path="run"),
     "results": st.Page(results.render, title="Results", icon=":material/table_view:", url_path="results"),
     "settings": st.Page(settings.render, title="Settings", icon=":material/key:", url_path="settings"),

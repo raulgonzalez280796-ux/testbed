@@ -11,6 +11,7 @@ from importlib import resources
 from pathlib import Path
 
 from .scenario import Scenario, load_scenario, save_scenario
+from .tools.library import NOTES_FILE, load_notes, merge_notes
 from .tools.loader import referenced_files
 
 TEMPLATES = Path(str(resources.files("testbed") / "templates"))
@@ -61,7 +62,16 @@ def init_project(home: Path) -> list[str]:
             if source.is_file() and not target.exists():
                 shutil.copy2(source, target)
                 created.append(f"{kind}/{source.name}")
+    if f"tools/{NOTES_FILE}" not in created:
+        add_template_notes(home, created)
     return created
+
+
+def add_template_notes(home: Path, copied: list[str]) -> None:
+    """Give tools copied from the templates their notes, keeping the researcher's own."""
+    stems = {Path(item).stem for item in copied if item.startswith("tools/") and item.endswith(".py")}
+    template_notes = load_notes(TEMPLATES / "tools")
+    merge_notes(home / "tools", {name: text for name, text in template_notes.items() if name in stems})
 
 
 def template_names() -> list[str]:
@@ -85,6 +95,7 @@ def copy_template_code(home: Path, scenario: Scenario) -> list[str]:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, target)
                 copied.append(f"{kind}/{stem}.py")
+    add_template_notes(home, copied)
     return copied
 
 

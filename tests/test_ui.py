@@ -6,6 +6,7 @@ import yaml
 from streamlit.testing.v1 import AppTest
 
 from testbed.project import init_project
+from testbed.tools.library import load_notes, starter_code
 
 from . import fakes
 from .helpers import HomeTestCase
@@ -16,7 +17,7 @@ def page_script(home, body: str) -> str:
         "import os\n"
         f"os.environ['TESTBED_HOME'] = {str(home)!r}\n"
         "import streamlit as st\n"
-        "from testbed.ui.views import results, run, scenarios, settings, tools_page\n"
+        "from testbed.ui.views import checks_page, results, run, scenarios, settings, tools_page\n"
         "st.session_state['pages'] = {}\n"
         f"{body}\n"
     )
@@ -30,8 +31,8 @@ class UiTests(HomeTestCase):
             agent["provider"], agent["model"] = "fake", f"script-{agent['id']}"
         path = self.home / "scenarios" / "fake_help.yaml"
         path.write_text(yaml.safe_dump(data))
-        fakes.SCRIPTS["script-A"] = [{"tool": "append_file", "args": {"name": "log.txt", "text": "help"}}, "Posted."]
-        fakes.SCRIPTS["script-B"] = [{"tool": "read_file", "args": {"name": "log.txt"}}, "Read it."]
+        fakes.SCRIPTS["script-A"] = [{"tool": "write_log", "args": {"text": "help"}}, "Posted."]
+        fakes.SCRIPTS["script-B"] = [{"tool": "read_log"}, "Read it."]
         self.batch_dir, _ = await self.run_scenario(path, trials=2, parallel=2)
 
     def render(self, body: str) -> AppTest:
@@ -41,7 +42,7 @@ class UiTests(HomeTestCase):
         return app
 
     def test_pages_render(self):
-        for page in ("settings", "tools_page", "scenarios", "run", "results"):
+        for page in ("settings", "tools_page", "checks_page", "scenarios", "run", "results"):
             with self.subTest(page=page):
                 self.render(f"{page}.render()")
 
@@ -110,7 +111,7 @@ class EditorRegressionTests(HomeTestCase):
         self.assertEqual(data["schedule"]["order"], ["A", "B", "C"])
         # The template had comments, so the original was kept once as a .bak.
         backup = self.home / "scenarios" / "help_seeking.yaml.bak"
-        self.assertTrue(backup.read_text().startswith("# The v1 experiment, built without code"))
+        self.assertTrue(backup.read_text().startswith("# The v1 experiment with predefined tools"))
 
     def test_save_as_copy_and_discard(self):
         app = self.editor(self.home / "scenarios" / "negotiation.yaml")
@@ -159,20 +160,42 @@ class EditorRegressionTests(HomeTestCase):
         sidebar = " ".join(element.value for element in app.sidebar.markdown)
         self.assertNotIn("unsaved changes", sidebar)
 
-    def test_quick_add_a_file_tool_and_give_it_to_an_agent(self):
+    def test_editor_has_no_tools_tab_or_access_grid(self):
+        app = self.editor(self.home / "scenarios" / "help_seeking.yaml")
+        self.assertEqual([tab.label for tab in app.tabs],
+                         ["General", "Agents", "Files", "Variables", "Checks & budget", "Preview"])
+        self.assertFalse([b for b in app.button if b.label.startswith("+ ")])
+        self.assertFalse([t for t in app.toggle if "Access grid" in t.label])
+
+    def test_agents_pick_from_every_tool_with_its_note(self):
+        from testbed.tools.library import set_note
+
+        set_note(self.home / "tools", "read_log", "My note about read_log.")
         app = self.editor(self.home / "scenarios" / "negotiation.yaml")
-        next(b for b in app.button if b.label == "+ read tool").click().run()
-        self.assertFalse(app.exception, [e.value for e in app.exception])
-        self.assertEqual(app.session_state["editor"]["data"]["tools"],
-                         [{"name": "read_deal", "kind": "read_file", "file": "deal.txt"}])
         picker = next(m for m in app.multiselect if m.label == "Tools")  # the Seller's
-        self.assertIn("read_deal — reads deal.txt", picker.options)  # shown first, with what it does
-        picker.set_value(list(picker.value) + ["read_deal"]).run()
+        self.assertIn("read_log — My note about read_log.", picker.options)
+        self.assertIn("submit_secret — Secret keeper - checks the guess; a correct one ends the trial.",
+                      picker.options)
+        picker.set_value(list(picker.value) + ["read_log"]).run()
+        next(b for b in app.button if b.label == "Save").click().run()
+        self.assertIn("read_log", self.saved("negotiation.yaml")["agents"][0]["tools"])
+
+    def test_an_old_scenario_is_updated_when_opened(self):
+        data = self.saved("help_seeking.yaml")
+        data["files"][0]["access"] = {"A": ["read", "append"]}
+        data["tools"] = [{"name": "read_log", "kind": "read_file", "file": "log.txt"}]
+        path = self.home / "scenarios" / "old.yaml"
+        path.write_text(yaml.safe_dump(data, sort_keys=False))
+        app = self.editor(path)
+        warnings = " ".join(w.value for w in app.warning)
+        self.assertIn("file access grid (on log.txt)", warnings)
+        self.assertIn("defined its own tools (read_log)", warnings)
+        self.assertIn("unsaved changes", " ".join(m.value for m in app.sidebar.markdown))
         self.assertEqual(self.problems(app), [])
         next(b for b in app.button if b.label == "Save").click().run()
-        saved = self.saved("negotiation.yaml")
-        self.assertEqual(saved["tools"], [{"name": "read_deal", "kind": "read_file", "file": "deal.txt"}])
-        self.assertIn("read_deal", saved["agents"][0]["tools"])
+        saved = self.saved("old.yaml")
+        self.assertNotIn("tools", saved)
+        self.assertNotIn("access", saved["files"][0])
 
     def test_help_seeking_shows_its_single_purpose_tools(self):
         app = self.editor(self.home / "scenarios" / "help_seeking.yaml")
@@ -189,6 +212,112 @@ class EditorRegressionTests(HomeTestCase):
         self.assertEqual(next_id(used), "A1")
         used["agents"].append({"id": "A1"})
         self.assertEqual(next_id(used), "A2")
+
+
+class ToolsPageTests(HomeTestCase):
+    """The Tools page: list, add, edit, check, note, duplicate, delete."""
+
+    def setUp(self):
+        super().setUp()
+        init_project(self.home)
+        self.tools = self.home / "tools"
+
+    def page(self) -> AppTest:
+        body = "st.session_state.setdefault('plain_editor', True)\ntools_page.render()"
+        app = AppTest.from_string(page_script(self.home, body), default_timeout=60)
+        app.run()
+        self.assertFalse(app.exception, [e.value for e in app.exception])
+        return app
+
+    def open(self, app: AppTest, name: str) -> AppTest:
+        next(s for s in app.selectbox if s.label == "Open a tool").set_value(name).run()
+        self.assertFalse(app.exception, [e.value for e in app.exception])
+        return app
+
+    def code(self, app: AppTest):
+        return next(box for box in app.text_area if box.label == "Code")
+
+    def click(self, app: AppTest, label: str, key: str | None = None) -> AppTest:
+        next(b for b in app.button if b.label == label and (key is None or b.key == key)).click().run()
+        self.assertFalse(app.exception, [e.value for e in app.exception])
+        return app
+
+    def test_the_list_shows_every_tool_its_note_and_who_uses_it(self):
+        table = self.page().dataframe[0].value
+        rows = {row["Tool"]: row for row in table.to_dict("records")}
+        self.assertEqual(set(rows), {path.stem for path in self.tools.glob("*.py")})
+        self.assertEqual(rows["write_log"]["Check"], "✓ ok")
+        self.assertEqual(rows["write_log"]["File"], "log.txt (append)")
+        self.assertEqual(rows["write_log"]["The model is told"], "Append text followed by a newline to log.txt.")
+        self.assertIn("help_seeking (A, B)", rows["write_log"]["Used by"])
+        self.assertEqual(rows["submit_secret"]["Used by"], "secret_keeper (Requester)")
+        self.assertTrue(rows["check_env"]["Your note"].startswith("Lists every file"))
+
+    def test_add_a_tool_from_a_starter(self):
+        app = self.click(self.page(), "Add tool")
+        next(r for r in app.radio if r.label == "Starter").set_value("append").run()
+        next(t for t in app.text_input if t.label == "Name").set_value("add_note").run()
+        next(t for t in app.text_input if t.label == "The file it works on").set_value("diary.txt").run()
+        next(t for t in app.text_input if t.label == "Your note (optional)").set_value("For the diary study.").run()
+        self.click(app, "Create tool")
+        source = (self.tools / "add_note.py").read_text()
+        self.assertIn('@tool(file="diary.txt", op="append")\ndef add_note(', source)
+        self.assertEqual(load_notes(self.tools)["add_note"], "For the diary study.")
+        self.assertEqual(app.selectbox[0].value, "add_note")  # the new tool is open
+        self.assertTrue(any("Created the tool add_note" in s.value for s in app.success))
+
+    def test_paste_a_tool(self):
+        app = self.click(self.page(), "Add tool")
+        next(r for r in app.radio if r.label == "Start from").set_value("paste").run()
+        pasted = starter_code("read", "read_diary", "diary.txt")
+        self.code(app).set_value(pasted).run()
+        self.assertTrue(any("tools/read_diary.py" in c.value for c in app.caption))
+        self.click(app, "Save", key="tool_new_save")
+        self.assertEqual((self.tools / "read_diary.py").read_text(), pasted)
+        # The same name again is refused.
+        app = self.click(self.page(), "Add tool")
+        next(r for r in app.radio if r.label == "Start from").set_value("paste").run()
+        self.code(app).set_value(pasted).run()
+        self.click(app, "Save", key="tool_new_save")
+        self.assertTrue(any("already exists" in e.value for e in app.error))
+
+    def test_edit_check_and_save(self):
+        app = self.open(self.page(), "read_log")
+        original = (self.tools / "read_log.py").read_text()
+        self.code(app).set_value(original.replace("def read_log(", "def read_logs(")).run()
+        self.click(app, "Check", key="tool_check_read_log")
+        self.assertTrue(any("called read_logs but the file is read_log.py" in e.value for e in app.error))
+        self.click(app, "Save", key="tool_save_read_log")
+        self.assertTrue(any("Not saved" in e.value for e in app.error))
+        self.assertEqual((self.tools / "read_log.py").read_text(), original)
+        edited = original.replace('"""Read the UTF-8 contents of log.txt."""', '"""Read the shared log."""')
+        self.code(app).set_value(edited).run()
+        self.click(app, "Save", key="tool_save_read_log")
+        self.assertEqual((self.tools / "read_log.py").read_text(), edited)
+
+    def test_note_duplicate_and_delete(self):
+        app = self.open(self.page(), "write_output")
+        next(t for t in app.text_input if t.label == "Your note").set_value("Only B has this.").run()
+        self.assertEqual(load_notes(self.tools)["write_output"], "Only B has this.")
+        next(t for t in app.text_input if t.label == "Name of the copy").set_value("write_answer").run()
+        self.click(app, "Duplicate", key="tool_dup_write_output")
+        copy = (self.tools / "write_answer.py").read_text()
+        self.assertIn("def write_answer(ctx: ToolContext, content: str)", copy)
+        self.assertEqual(load_notes(self.tools)["write_answer"], "Only B has this.")
+        self.assertEqual(app.selectbox[0].value, "write_answer")
+        # Deleting a tool that scenarios use says which ones.
+        app = self.open(app, "write_output")
+        self.assertTrue(any("help_seeking (B)" in w.value for w in app.warning))
+        self.click(app, "Delete", key="tool_delete_write_output")
+        self.assertFalse((self.tools / "write_output.py").exists())
+        self.assertNotIn("write_output", load_notes(self.tools))
+
+    def test_a_broken_file_is_listed_with_its_errors(self):
+        (self.tools / "broken.py").write_text("from testbed import tool\n\n@tool\ndef broken(x):\n    return x\n")
+        rows = {row["Tool"]: row for row in self.page().dataframe[0].value.to_dict("records")}
+        self.assertTrue(rows["broken"]["Check"].startswith("✗"))
+        app = self.open(self.page(), "broken")
+        self.assertTrue(any("needs a type hint" in e.value for e in app.error))
 
 
 if __name__ == "__main__":

@@ -93,15 +93,28 @@ class AnthropicAdapterTests(unittest.TestCase):
         parsed = parse_response({}, message([TextBlock(type="text", text="Cut")], stop_reason="max_tokens"))
         self.assertTrue(parsed.truncated)
 
-    def test_v1_tools_send_v1_schemas(self):
-        tools = resolve_agent_tools(["v1_tools:list_files", "v1_tools:append_log"], REPO / "testbed" / "templates" / "tools", "A")
-        self.assertEqual(tools["list_files"].parameters, {"properties": {}, "required": [], "type": "object"})
-        self.assertEqual(tools["append_log"].parameters, {
-            "properties": {"text": {"description": "text", "title": "Text", "type": "string"}},
-            "required": ["text"], "type": "object",
+    def test_predefined_v1_tools_send_v1_schemas(self):
+        refs = ["list_files", "read_log", "append_log", "read_output", "write_output", "read_counter", "write_counter"]
+        tools = resolve_agent_tools(refs, REPO / "testbed" / "templates" / "tools", "A")
+        no_args = {"properties": {}, "required": [], "type": "object"}
+
+        def one_text(name):
+            return {"properties": {name: {"description": name, "title": name.title(), "type": "string"}},
+                    "required": [name], "type": "object"}
+
+        self.assertEqual({name: tool.parameters for name, tool in tools.items()}, {
+            "list_files": no_args, "read_log": no_args, "append_log": one_text("text"),
+            "read_output": no_args, "write_output": one_text("content"),
+            "read_counter": no_args, "write_counter": one_text("content"),
         })
         self.assertEqual(tools["append_log"].description, "Append text followed by a newline to log.txt.")
-
+        self.assertEqual(tools["write_output"].description,
+                         "Replace the contents of output.txt with the supplied UTF-8 text.")
+        self.assertEqual({name: (tool.target_file, tool.op) for name, tool in tools.items()}, {
+            "list_files": (None, "list"), "read_log": ("log.txt", "read"), "append_log": ("log.txt", "append"),
+            "read_output": ("output.txt", "read"), "write_output": ("output.txt", "write"),
+            "read_counter": ("counter.txt", "read"), "write_counter": ("counter.txt", "write"),
+        })
 
 if __name__ == "__main__":
     unittest.main()

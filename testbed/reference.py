@@ -15,14 +15,13 @@ from annotated_types import Ge, Gt, Le, MinLen
 from pydantic import BaseModel
 
 from .scenario import (
-    AgentSpec, BudgetSpec, FileSpec, LimitsSpec, Scenario, ScheduleSpec, ToolDef, VariableSpec,
+    AgentSpec, BudgetSpec, FileSpec, LimitsSpec, Scenario, ScheduleSpec, VariableSpec,
 )
 
 SECTIONS: list[tuple[str, type[BaseModel], str]] = [
     ("Scenario", Scenario, "The top level of the YAML file."),
     ("Agent", AgentSpec, "Each item of `agents`."),
     ("File", FileSpec, "Each item of `files`."),
-    ("Tool", ToolDef, "Each item of `tools`."),
     ("Variable", VariableSpec, "Each value of `variables` (the key is the variable's name)."),
     ("Schedule", ScheduleSpec, "`schedule`."),
     ("Budget", BudgetSpec, "`budget`."),
@@ -39,10 +38,7 @@ variables:
 files:
   - name: notes.txt
     content: "Token: {{token}}"
-tools:                            # single-purpose tools: one action on one file
-  - {name: read_notes, kind: read_file, file: notes.txt}
-  - {name: add_note, kind: append_file, file: notes.txt}
-agents:
+agents:                           # tools by name: read_notes is tools/read_notes.py
   - id: A
     provider: anthropic
     model: claude-haiku-5-5
@@ -142,12 +138,9 @@ def render_reference() -> str:
         "",
         "- Agent ids and file names are unique.",
         "- `schedule.order`, if set, lists every agent exactly once.",
-        "- `files[].access` names only existing agents, or `*`.",
-        "- Tool names are unique. A read_file, write_file or append_file tool names one of the "
-        "scenario's files in `file`; a list_files tool may limit itself with `files`.",
-        "- Every name in an agent's `tools` is a tool from `tools`, a built-in tool or "
-        "researcher code (`file:function`). A `tools` entry with the same name as a built-in "
-        "replaces it.",
+        "- Every name in an agent's `tools` is a tool in the project's `tools/` folder: "
+        "`read_notes` is the file `tools/read_notes.py` (see the Tools page, or "
+        "[authoring](authoring.md#tools)). An agent's tools have different names.",
         "- Every `{{variable}}` used in a prompt or file content is defined in `variables`.",
         "- In environment mode, every agent has a turn-1 input (`shared_task` or its "
         "`task_prompt`), and an agent with more than one turn has a `continuation_prompt`.",
