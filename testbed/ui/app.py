@@ -2,6 +2,9 @@
 
 It only edits files in the project folder and starts runs as separate
 processes; all logic lives in the testbed package, so the UI can be replaced.
+
+The screens live in views/, not pages/: Streamlit treats a pages/ folder next to
+the entry script as standalone pages, which breaks opening a page URL directly.
 """
 
 import streamlit as st
@@ -10,7 +13,7 @@ from testbed import __version__
 from testbed.project import ensure_project
 from testbed.ui.components.code_box import code_editor
 from testbed.ui.components.common import home
-from testbed.ui.pages import results, run, scenarios, settings, tools_page
+from testbed.ui.views import results, run, scenarios, settings, tools_page
 
 st.set_page_config(page_title="llmArena testbed", page_icon=":material/hub:", layout="wide")
 

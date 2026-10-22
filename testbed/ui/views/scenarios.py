@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import shutil
 import string
 from pathlib import Path
 
@@ -29,7 +30,16 @@ from testbed.ui.components.common import (
 ED = "editor"
 OPS = ["list", "read", "write", "append"]
 OTHER_MODEL = "Other model id…"
-_uids = itertools.count(1)
+
+
+def new_uid() -> int:
+    """Widget-key ids, kept per browser session so a module reload can never reuse one."""
+    st.session_state["ed_uid"] = st.session_state.get("ed_uid", 0) + 1
+    return st.session_state["ed_uid"]
+
+
+def unique(ids: list) -> list:
+    return list(dict.fromkeys(ids))
 
 
 # -- working copy ---------------------------------------------------------------
@@ -58,8 +68,8 @@ def load_into_editor(path: Path | None, data: dict) -> None:
     state = {
         "path": str(path) if path else None,
         "data": json.loads(json.dumps(data)),
-        "agent_uids": [next(_uids) for _ in data.get("agents", [])],
-        "file_uids": [next(_uids) for _ in data.get("files", [])],
+        "agent_uids": [new_uid() for _ in data.get("agents", [])],
+        "file_uids": [new_uid() for _ in data.get("files", [])],
         "file_versions": {},
         "grids": {},
     }
@@ -155,16 +165,24 @@ def general_tab(data: dict) -> None:
             "How other agents' messages are shown", data.get("conversation_format", "[{sender}]: {text}"),
             key=key("conversation_format"),
             help="{sender} is the agent id, {text} the message. Use just {text} to hide who sent it.")
-    ids = [agent["id"] for agent in data.get("agents", [])]
+    ids = unique(agent.get("id", "") for agent in data.get("agents", []))
     schedule = data.setdefault("schedule", {})
-    current = [agent_id for agent_id in (schedule.get("order") or ids) if agent_id in ids]
+    stored = schedule.get("order")
+    current = unique(agent_id for agent_id in (stored or ids) if agent_id in ids)
     current += [agent_id for agent_id in ids if agent_id not in current]
     left, right = st.columns(2)
-    order = left.multiselect("Turn order in each round", ids, default=current,
-                             key=key(f"order_{','.join(ids)}"),
-                             help="Every agent must be listed once.")
-    if order != current:  # only touch the file's value when the researcher changes the order
-        schedule["order"] = order
+    chosen = left.multiselect("Turn order in each round", ids, default=current,
+                              key=key(f"order_{','.join(ids)}"),
+                              help="Every agent takes one turn per round, in this order. To reorder, "
+                                   "remove agents and add them back in the order you want.")
+    missing = [agent_id for agent_id in ids if agent_id not in chosen]
+    order = chosen + missing  # every agent must take turns; anyone left out goes last
+    if missing:
+        left.caption(f"{', '.join(missing)} {'goes' if len(missing) == 1 else 'go'} last "
+                     "(every agent takes a turn).")
+    # Keep "no order" (= the agents' listed order) when nothing was set; otherwise store
+    # exactly what is shown, so the screen and the file can never disagree.
+    schedule["order"] = None if stored is None and order == ids else order
     modes = ["fixed", "random_each_round"]
     schedule["mode"] = right.radio(
         "Order", modes, index=modes.index(schedule.get("mode", "fixed")), key=key("mode"),
@@ -202,15 +220,21 @@ def agents_tab(project: Path, data: dict, state: dict) -> None:
     options = tool_options(project)
     agents = data.setdefault("agents", [])
     st.caption("Each agent has its own model, prompts and tools, and keeps its own history.")
+    while len(state["agent_uids"]) < len(agents):
+        state["agent_uids"].append(new_uid())
     for index, (agent, uid) in enumerate(zip(list(agents), list(state["agent_uids"]))):
         with st.expander(f"Agent **{agent.get('id', '?')}** · {agent.get('provider')} / {agent.get('model')}",
-                         expanded=len(agents) <= 2):
+                         expanded=len(agents) <= 2, key=key(f"{uid}_panel")):
             top = st.columns([1, 1, 1])
             new_id = top[0].text_input("Id", agent.get("id", ""), key=key(f"{uid}_id"),
                                        help="Letters, digits, _ and -. Shown to other agents in conversation mode.")
+            others = {other.get("id") for position, other in enumerate(agents) if position != index}
             if new_id != agent.get("id"):
-                rename_agent(data, agent.get("id"), new_id)
-                agent["id"] = new_id
+                if new_id in others:
+                    top[0].error(f"Another agent is already called {new_id!r}; pick a different id.")
+                else:
+                    rename_agent(data, agent.get("id"), new_id)
+                    agent["id"] = new_id
             names = providers.provider_names()
             provider = top[1].selectbox(
                 "Provider", names, index=names.index(agent["provider"]) if agent.get("provider") in names else 0,
@@ -275,14 +299,14 @@ def agents_tab(project: Path, data: dict, state: dict) -> None:
 
 def next_id(data: dict) -> str:
     used = {agent.get("id") for agent in data.get("agents", [])}
-    return next(letter for letter in string.ascii_uppercase + "".join(f"A{i}" for i in range(100))
-                if letter not in used)
+    candidates = itertools.chain(string.ascii_uppercase, (f"A{i}" for i in itertools.count(1)))
+    return next(candidate for candidate in candidates if candidate not in used)
 
 
 def add_agent(state: dict, available: dict) -> None:
     data = state["data"]
     data["agents"].append(blank_agent(next_id(data), available))
-    state["agent_uids"].append(next(_uids))
+    state["agent_uids"].append(new_uid())
     if (data.get("schedule") or {}).get("order"):
         data["schedule"]["order"].append(data["agents"][-1]["id"])
 
@@ -292,7 +316,7 @@ def duplicate_agent(state: dict, index: int) -> None:
     copy = json.loads(json.dumps(data["agents"][index]))
     copy["id"] = next_id(data)
     data["agents"].insert(index + 1, copy)
-    state["agent_uids"].insert(index + 1, next(_uids))
+    state["agent_uids"].insert(index + 1, new_uid())
     if (data.get("schedule") or {}).get("order"):
         data["schedule"]["order"].append(copy["id"])
 
@@ -314,21 +338,24 @@ def remove_agent(state: dict, index: int) -> None:
 
 
 def access_grid(state: dict, spec: dict, uid: int, ids: list[str]) -> dict:
+    """Agents x operations grid. Rows are read by position, so any agent id is safe."""
     rows = ["*", *ids]
     grid_key = key(f"{uid}_access_{','.join(ids)}")
     if grid_key not in state["grids"]:
         access = spec.get("access") or {}
-        state["grids"][grid_key] = pd.DataFrame(
-            {op: [op in access.get(row, []) for row in rows] for op in OPS},
-            index=["All agents" if row == "*" else row for row in rows],
-        )
+        state["grids"][grid_key] = pd.DataFrame({
+            "agent": ["All agents" if row == "*" else row for row in rows],
+            **{op: [op in access.get(row, []) for row in rows] for op in OPS},
+        })
     edited = st.data_editor(
-        state["grids"][grid_key], key=grid_key, width="stretch",
-        column_config={op: st.column_config.CheckboxColumn(op) for op in OPS},
+        state["grids"][grid_key], key=grid_key, width="stretch", hide_index=True,
+        disabled=["agent"],
+        column_config={"agent": st.column_config.TextColumn("agent"),
+                       **{op: st.column_config.CheckboxColumn(op) for op in OPS}},
     )
     access = {}
-    for row, label in zip(rows, edited.index):
-        ops = [op for op in OPS if bool(edited.loc[label, op])]
+    for position, row in enumerate(rows):
+        ops = [op for op in OPS if bool(edited.iloc[position][op])]
         if ops:
             access[row] = ops
     return access
@@ -339,9 +366,12 @@ def files_tab(data: dict, state: dict) -> None:
                "agent's built-in file tools may do: list (see the name), read, write, append. "
                "Researcher tools can reach every file through ctx.files.")
     files = data.setdefault("files", [])
-    ids = [agent["id"] for agent in data.get("agents", [])]
+    ids = unique(agent.get("id", "") for agent in data.get("agents", []))
+    while len(state["file_uids"]) < len(files):
+        state["file_uids"].append(new_uid())
     for index, (spec, uid) in enumerate(zip(list(files), list(state["file_uids"]))):
-        with st.expander(f"**{spec.get('name') or '(unnamed)'}**", expanded=len(files) <= 3):
+        with st.expander(f"**{spec.get('name') or '(unnamed)'}**", expanded=len(files) <= 3,
+                         key=key(f"{uid}_panel")):
             spec["name"] = st.text_input("File name", spec.get("name", ""), key=key(f"{uid}_fname"))
             version = state["file_versions"].get(uid, 0)
             spec["content"] = st.text_area(
@@ -362,7 +392,7 @@ def add_file(state: dict) -> None:
     names = {spec.get("name") for spec in files}
     name = next(f"file{i}.txt" for i in itertools.count(1) if f"file{i}.txt" not in names)
     files.append({"name": name, "content": "", "access": {}})
-    state["file_uids"].append(next(_uids))
+    state["file_uids"].append(new_uid())
 
 
 def remove_file(state: dict, index: int) -> None:
@@ -501,6 +531,25 @@ def preview_tab(project: Path, scenario: Scenario | None, errors: list[str]) -> 
 
 # -- page -------------------------------------------------------------------------
 
+def has_comments(path: Path) -> bool:
+    try:
+        return any(line.lstrip().startswith("#") for line in path.read_text(encoding="utf-8").splitlines())
+    except OSError:
+        return False
+
+
+def save(project: Path, target: Path, scenario: Scenario) -> None:
+    """Write the scenario; keep a .bak of a hand-written file with comments the first time."""
+    backup = target.with_name(target.name + ".bak")
+    note = ""
+    if target.exists() and has_comments(target) and not backup.exists():
+        shutil.copy2(target, backup)
+        note = f" Your original, with its comments, is kept as scenarios/{backup.name}."
+    write_scenario(target, scenario)
+    copy_template_code(project, scenario)
+    open_file(target)
+    flash(f"Saved scenarios/{target.name}.{note}")
+
 def toolbar(project: Path) -> None:
     files = scenario_files(project)
     state = st.session_state.get(ED)
@@ -578,13 +627,24 @@ def render() -> None:
             st.success("Valid scenario.")
         if st.button("Save", type="primary", disabled=bool(errors), width="stretch"):
             if path is None and target.exists():
-                st.error(f"scenarios/{target.name} already exists; change the name.")
+                st.error(f"scenarios/{target.name} already exists; change the name or use Save as copy.")
             else:
-                write_scenario(target, scenario)
-                copy_template_code(project, scenario)
-                open_file(target)
-                flash(f"Saved scenarios/{target.name}.")
+                save(project, target, scenario)
                 st.rerun()
+        with st.popover("Save as copy", width="stretch", disabled=bool(errors)):
+            stem = st.text_input("New file name", f"{target.stem}_copy", key=key("copy_stem"))
+            copy_target = project / "scenarios" / f"{safe_stem(stem)}.yaml"
+            if st.button("Save copy", type="primary", key=key("copy_save")):
+                if copy_target.exists():
+                    st.error(f"scenarios/{copy_target.name} already exists.")
+                else:
+                    save(project, copy_target, scenario)
+                    st.rerun()
+        if st.button("Discard changes", disabled=not dirty or path is None, width="stretch",
+                     help="Reopen the file as it is on disk."):
+            open_file(path)
+            flash("Changes discarded.", "info")
+            st.rerun()
         if st.button("Run this scenario", disabled=bool(errors) or dirty or path is None, width="stretch",
                      help="Save first."):
             st.session_state["run_scenario"] = target.name
@@ -597,4 +657,5 @@ def render() -> None:
                     st.session_state.pop(ED, None)
                     flash(f"Deleted scenarios/{path.name}.", "info")
                     st.rerun()
-        st.caption("Saving rewrites the YAML file in a standard layout (comments are not kept).")
+        st.caption("Saving rewrites the YAML file in a standard layout. Comments are not kept; "
+                   "a file with comments is first copied to <name>.yaml.bak.")

@@ -30,20 +30,34 @@ class Spec(BaseModel):
 
 
 class FileSpec(Spec):
-    name: str = Field(pattern=FILE_NAME_PATTERN)
-    content: str = ""
-    # Agent id (or "*" for every agent) -> operations its built-in file tools may do.
-    access: dict[str, list[FileOp]] = {}
+    """A file in the workspace. Every trial starts with a fresh copy of each file."""
+
+    name: str = Field(
+        pattern=FILE_NAME_PATTERN,
+        description="File name, without folders: letters, digits, '.', '_' and '-'.")
+    content: str = Field(
+        "", description="Initial content. {{variable}} is replaced with the trial's value.")
+    access: dict[str, list[FileOp]] = Field(
+        {}, description=(
+            "What each agent's built-in file tools may do with this file: agent id (or '*' "
+            "for every agent) -> a list of list, read, write, append. 'list' alone shows the "
+            "name in list_files without allowing reads or writes. Researcher tools reach "
+            "every file through ctx.files regardless."))
 
 
 class VariableSpec(Spec):
-    type: Literal["constant", "random_token", "int_range", "choice"]
-    value: Any = None            # constant
-    prefix: str = ""             # random_token
-    nbytes: int = Field(12, ge=1, le=64)  # random_token: hex characters = 2 * nbytes
-    min: int | None = None       # int_range
-    max: int | None = None
-    options: list[Any] | None = None  # choice
+    """A value drawn for each trial from the trial's seed, so a re-run trial gets the same value."""
+
+    type: Literal["constant", "random_token", "int_range", "choice"] = Field(
+        description="How the value is chosen.")
+    value: Any = Field(None, description="constant: the value.")
+    prefix: str = Field("", description="random_token: text before the random hex part.")
+    nbytes: int = Field(
+        12, ge=1, le=64,
+        description="random_token: random bytes; the token has 2 hex characters per byte.")
+    min: int | None = Field(None, description="int_range: the smallest value (inclusive).")
+    max: int | None = Field(None, description="int_range: the largest value (inclusive).")
+    options: list[Any] | None = Field(None, description="choice: the values to pick from.")
 
     @model_validator(mode="after")
     def check_fields(self) -> VariableSpec:
@@ -57,60 +71,116 @@ class VariableSpec(Spec):
 
 
 class AgentSpec(Spec):
-    id: str = Field(pattern=NAME_PATTERN)
-    provider: str
-    model: str
-    # Passed to the provider as-is (e.g. max_tokens, output_config, temperature).
-    # The one testbed key is "cache" (default true): provider prompt caching.
-    params: dict[str, Any] = {}
-    system_prompt: str = ""
-    task_prompt: str = ""          # turn 1, after the scenario's shared_task
-    continuation_prompt: str = ""  # turns 2+
-    turns: int = Field(10, ge=1, le=1000)
-    max_model_calls_per_turn: int = Field(2, ge=1, le=100)
-    # Built-in tool names, or "<file stem>:<function>" for researcher tools in tools/.
-    tools: list[str] = []
-    request_timeout_seconds: float = Field(60.0, gt=0)
-    max_retries: int = Field(2, ge=0, le=10)
+    """One agent: its model, prompts, turns and tools. Each agent keeps its own history."""
+
+    id: str = Field(
+        pattern=NAME_PATTERN,
+        description=("Unique name: a letter, then letters, digits, '_' or '-'. In conversation "
+                     "mode it is shown to the other agents as {sender}."))
+    provider: str = Field(description="anthropic, openai or gemini.")
+    model: str = Field(description="The provider's model id, e.g. claude-haiku-5-5.")
+    params: dict[str, Any] = Field(
+        {}, description=(
+            "Sent to the provider as-is, e.g. max_tokens (all providers), output_config "
+            "(Anthropic), reasoning (OpenAI), thinking_config (Gemini). The one testbed key "
+            "is cache (default true): provider prompt caching."))
+    system_prompt: str = Field("", description="Sent with every model call.")
+    task_prompt: str = Field(
+        "", description="The agent's turn-1 input, after the scenario's shared_task.")
+    continuation_prompt: str = Field(
+        "", description=("The input for turns 2 and later. Required in environment mode; in "
+                         "conversation mode it may be empty, so the other agents' new "
+                         "messages are the whole input."))
+    turns: int = Field(
+        10, ge=1, le=1000,
+        description="How many turns this agent takes; it is skipped in later rounds.")
+    max_model_calls_per_turn: int = Field(
+        2, ge=1, le=100,
+        description=("A turn ends when the model answers without a tool call, or after this "
+                     "many calls. Tool results from the last call are seen next turn."))
+    tools: list[str] = Field(
+        [], description=("Built-in tool names (list_files, read_file, write_file, append_file), "
+                         "or file:function for researcher tools in tools/."))
+    request_timeout_seconds: float = Field(
+        60.0, gt=0, description="Timeout for one model request.")
+    max_retries: int = Field(
+        2, ge=0, le=10, description="Quick retries inside the provider's SDK, per request.")
 
 
 class ScheduleSpec(Spec):
-    order: list[str] | None = None  # default: agents in the order they are listed
-    mode: Literal["fixed", "random_each_round"] = "fixed"
+    """Who takes turns, in what order."""
+
+    order: list[str] | None = Field(
+        None, description=("Turn order in each round; must list every agent once. Empty means "
+                           "the order the agents are listed in."))
+    mode: Literal["fixed", "random_each_round"] = Field(
+        "fixed", description=("fixed: the same order every round. random_each_round: "
+                              "shuffled every round from the trial's seed."))
 
 
 class BudgetSpec(Spec):
-    max_total_tokens: int | None = Field(None, ge=1)  # whole batch
-    max_trial_tokens: int | None = Field(None, ge=1)  # one trial
-    overrun_tolerance: float = Field(0.10, ge=0, le=1)
+    """Token caps. Token use is always recorded, with or without caps."""
+
+    max_total_tokens: int | None = Field(
+        None, ge=1, description=("Cap for the whole batch: no new trials start once it is "
+                                 "reached; running trials stop at the cap plus the tolerance "
+                                 "(status budget_stopped)."))
+    max_trial_tokens: int | None = Field(
+        None, ge=1, description="Cap for one trial: it ends with stop reason token_cap.")
+    overrun_tolerance: float = Field(
+        0.10, ge=0, le=1,
+        description="How far running trials may go past max_total_tokens (0.10 = 10%).")
 
 
 class LimitsSpec(Spec):
-    max_tool_input_bytes: int = Field(16_000, ge=1)
-    max_file_bytes: int = Field(64_000, ge=1)
-    tool_timeout_seconds: float = Field(30.0, gt=0)
-    # Engine-level retries for rate limits, server and connection errors (after the SDK's own).
-    retry_attempts: int = Field(6, ge=0, le=20)
-    retry_max_delay_seconds: float = Field(60.0, gt=0)
+    """Safety limits for tools and retries."""
+
+    max_tool_input_bytes: int = Field(
+        16_000, ge=1, description="Largest tool-call input; larger calls return an error.")
+    max_file_bytes: int = Field(
+        64_000, ge=1, description="Largest workspace file the file tools will read or write.")
+    tool_timeout_seconds: float = Field(
+        30.0, gt=0, description="A tool call that takes longer returns a timeout error.")
+    retry_attempts: int = Field(
+        6, ge=0, le=20,
+        description=("Retries after rate limits, server or connection errors, on top of the "
+                     "SDK's own; the trial fails as infra_error after the last one."))
+    retry_max_delay_seconds: float = Field(
+        60.0, gt=0,
+        description="Longest wait between retries when the provider gives no retry-after.")
 
 
 class Scenario(Spec):
-    name: str = Field(min_length=1)
-    description: str = ""
-    interaction: Literal["environment", "conversation"] = "environment"
-    # conversation mode: how other agents' messages are shown to an agent.
-    conversation_format: str = "[{sender}]: {text}"
-    schedule: ScheduleSpec = ScheduleSpec()
-    max_rounds: int | None = Field(None, ge=1)  # default: the largest agent turn count
-    timeout_seconds: float = Field(720.0, gt=0)
-    shared_task: str = ""  # every agent gets this on turn 1, before its own task_prompt
-    variables: dict[str, VariableSpec] = {}
-    files: list[FileSpec] = []
-    agents: list[AgentSpec] = Field(min_length=1)
-    # "<file stem>:<function>" for researcher checks in checks/.
-    checks: list[str] = []
-    budget: BudgetSpec = BudgetSpec()
-    limits: LimitsSpec = LimitsSpec()
+    """A complete experiment setup: one YAML file in scenarios/."""
+
+    name: str = Field(min_length=1, description="Shown in the UI and recorded in every trial.")
+    description: str = Field("", description="For people; never sent to any agent.")
+    interaction: Literal["environment", "conversation"] = Field(
+        "environment", description=(
+            "environment: agents affect each other only through files and tools. "
+            "conversation: each turn also starts with the other agents' final texts since "
+            "this agent's last turn."))
+    conversation_format: str = Field(
+        "[{sender}]: {text}",
+        description=("conversation mode: how each message from another agent is shown. "
+                     "{sender} is its agent id, {text} the message; use {text} alone to hide "
+                     "the sender."))
+    schedule: ScheduleSpec = Field(ScheduleSpec(), description="Turn order.")
+    max_rounds: int | None = Field(
+        None, ge=1,
+        description="Rounds per trial. Empty means the largest agent turn count.")
+    timeout_seconds: float = Field(
+        720.0, gt=0, description="A trial still running after this long ends as timeout.")
+    shared_task: str = Field(
+        "", description="Every agent gets this on turn 1, before its own task_prompt.")
+    variables: dict[str, VariableSpec] = Field(
+        {}, description="Per-trial values, inserted with {{name}} in prompts and file contents.")
+    files: list[FileSpec] = Field([], description="The workspace files every trial starts with.")
+    agents: list[AgentSpec] = Field(min_length=1, description="At least one agent.")
+    checks: list[str] = Field(
+        [], description="file:function for researcher checks in checks/, run after every trial.")
+    budget: BudgetSpec = Field(BudgetSpec(), description="Token caps.")
+    limits: LimitsSpec = Field(LimitsSpec(), description="Tool and retry limits.")
 
     @field_validator("variables")
     @classmethod

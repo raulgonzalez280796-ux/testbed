@@ -6,3 +6,4 @@ PyYAML==6.0.3
 python-dotenv==1.2.4
 streamlit==1.66.0
 streamlit-code-editor==0.1.22
+watchdog==6.0.0

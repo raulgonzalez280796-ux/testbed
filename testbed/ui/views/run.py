@@ -159,7 +159,7 @@ def progress(batch_dir: Path) -> None:
         if status in ("running", "created") and alive:
             buttons[0].button("Cancel", key=f"cancel_{batch_dir.name}", on_click=request_cancel,
                               args=(batch_dir,), width="stretch")
-        elif done < planned or status in ("cancelled", "stopped", "budget_stopped"):
+        elif done < planned or status in ("running", "created", "cancelled", "stopped", "budget_stopped"):
             if buttons[0].button("Resume", key=f"resume_{batch_dir.name}", width="stretch"):
                 launch(home(), batch_dir)
                 st.rerun()
@@ -172,9 +172,12 @@ def progress(batch_dir: Path) -> None:
 def live_batches(project: Path) -> None:
     batches = list_batches(project)
     watching = [Path(path) for path in st.session_state.get("watching", [])]
-    active = [b for b in batches if (read_summary(b) or {}).get("status") in ("running", "created")
-              and runner_alive(b)]
-    shown = list(dict.fromkeys([*active, *[b for b in watching if b.exists()]]))[:5]
+    unfinished = [b for b in batches[:20]
+                  if (read_summary(b) or {}).get("status") in ("running", "created")]
+    active = [b for b in unfinished if runner_alive(b)]
+    # Batches whose runner stopped (e.g. the computer restarted) stay visible, with Resume.
+    interrupted = [b for b in unfinished if b not in active]
+    shown = list(dict.fromkeys([*active, *[b for b in watching if b.exists()], *interrupted]))[:5]
     if not shown:
         st.caption("No batch is running.")
     for batch_dir in shown:

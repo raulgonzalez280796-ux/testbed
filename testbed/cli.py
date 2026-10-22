@@ -9,6 +9,8 @@
   preview SCENARIO                                      what each agent will receive
   keys                                                  which provider keys are set
   init [FOLDER]                                         create a project folder with examples
+  schema [--out FILE]                                   JSON Schema of the scenario format
+  reference [--out FILE]                                the scenario reference as Markdown
   ui [--port P]                                         open the web UI (on this computer only)
 
 The project folder (scenarios/, tools/, checks/, runs/, .env) is --home,
@@ -47,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
         sub = commands.add_parser(name)
         sub.add_argument("scenario")
     commands.add_parser("keys")
+    for name in ("schema", "reference"):
+        sub = commands.add_parser(name)
+        sub.add_argument("--out", help="write to this file instead of printing")
     init = commands.add_parser("init", help="create a project folder with the example templates")
     init.add_argument("folder", nargs="?", default=".")
     ui = commands.add_parser("ui", help="open the web UI")
@@ -201,6 +206,27 @@ def cmd_keys(args, home: Path) -> int:
     return 0
 
 
+def _emit(text: str, out: str | None) -> int:
+    if out:
+        Path(out).write_text(text, encoding="utf-8")
+        print(f"Wrote {out}")
+    else:
+        print(text)
+    return 0
+
+
+def cmd_schema(args, home: Path) -> int:
+    from .reference import scenario_json_schema
+
+    return _emit(json.dumps(scenario_json_schema(), indent=2, ensure_ascii=False) + "\n", args.out)
+
+
+def cmd_reference(args, home: Path) -> int:
+    from .reference import render_reference
+
+    return _emit(render_reference(), args.out)
+
+
 def cmd_init(args, home: Path) -> int:
     from .project import init_project
 
@@ -237,5 +263,5 @@ def cmd_ui(args, home: Path) -> int:
 COMMANDS = {
     "run": cmd_run, "resume": cmd_resume, "cancel": cmd_cancel, "status": cmd_status,
     "recheck": cmd_recheck, "validate": cmd_validate, "preview": cmd_preview, "keys": cmd_keys,
-    "init": cmd_init, "ui": cmd_ui,
+    "init": cmd_init, "ui": cmd_ui, "schema": cmd_schema, "reference": cmd_reference,
 }

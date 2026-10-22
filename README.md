@@ -12,7 +12,15 @@ Then you run it once, or M times with N trials at a time. Every trial leaves a c
 - `result.json`: status, token use and your checks;
 - the final files.
 
-Status: **stage 1, milestone 3**. The engine, CLI, Python API and a local web UI all work, with Anthropic, OpenAI and Gemini.
+Version **0.1.0**: the first version (see [CHANGELOG](CHANGELOG.md)). The engine, CLI, Python API and a local web UI all work with Anthropic, OpenAI and Gemini. Only Anthropic has been tested live so far; the OpenAI and Gemini adapters are tested offline, through their SDKs against recorded responses.
+
+| Guide | Contents |
+|---|---|
+| [Writing scenarios, tools and checks](docs/authoring.md) | How a trial runs, interaction modes, file access, the tool and check APIs |
+| [Scenario reference](docs/scenario-reference.md) | Every field of the scenario file (generated from the code) |
+| [What a run leaves on disk](docs/results.md) | Folders, manifest, result and event fields, statuses, loading results in pandas |
+| [Troubleshooting](docs/troubleshooting.md) | Keys, rate limits, stopped batches, the UI |
+| [Pilot kit](docs/pilot.md) | Tasks and a feedback form for first users |
 
 ## Quick start
 
@@ -36,7 +44,7 @@ Create a project folder with the example scenarios, then open the UI:
 .venv/bin/python -m testbed --home my-lab ui
 ```
 
-The UI opens at http://localhost:8501. Then:
+The UI opens at http://localhost:8501 (the first load takes about 10 seconds). Then:
 
 1. Add an API key in **Settings**.
 2. Open or create a scenario in **Scenarios**.

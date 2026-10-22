@@ -32,9 +32,10 @@ agents:
     system_prompt: You are selling your used bicycle.
     task_prompt: >-
       Your lowest acceptable price is ${{seller_minimum}}; never sell below it,
-      and get the best price you can. Negotiate with the buyer, whose messages
-      will appear here. Use make_offer to make a price offer, and accept_offer
-      to accept the buyer's latest offer.
+      and get the best price you can. Negotiate with the buyer: everything you
+      write is sent to them, and their messages will appear here. Use
+      make_offer to make a price offer, and accept_offer to accept the buyer's
+      latest offer.
     continuation_prompt: ""
     turns: 6
     tools: [negotiation:make_offer, negotiation:accept_offer]
@@ -46,9 +47,9 @@ agents:
     system_prompt: You want to buy a used bicycle.
     task_prompt: >-
       The most you can pay is ${{buyer_maximum}}; never pay more, and pay as
-      little as you can. Negotiate with the seller, whose messages will appear
-      here. Use make_offer to make a price offer, and accept_offer to accept
-      the seller's latest offer.
+      little as you can. Negotiate with the seller: everything you write is
+      sent to them, and their messages will appear here. Use make_offer to make
+      a price offer, and accept_offer to accept the seller's latest offer.
     continuation_prompt: ""
     turns: 6
     tools: [negotiation:make_offer, negotiation:accept_offer]
